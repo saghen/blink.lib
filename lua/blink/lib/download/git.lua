@@ -1,12 +1,12 @@
-local async = require('blink.download.lib.async')
+local task = require('blink.lib.task')
 
 --- @class blink.download.Git
 local git = {}
 
 --- @param root_dir string
---- @return blink.download.Task
+--- @return blink.lib.Task
 function git.get_version(root_dir)
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     vim.system({ 'git', 'describe', '--tags', '--exact-match' }, { cwd = root_dir }, function(out)
       if out.code == 128 then return resolve({}) end
       if out.code ~= 0 then

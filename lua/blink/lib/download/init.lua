@@ -1,5 +1,5 @@
-local async = require('blink.download.lib.async')
-local git = require('blink.download.git')
+local task = require('blink.lib.task')
+local git = require('blink.lib.download.git')
 
 --- @class blink.download.Options
 --- @field download_url (fun(version: string, system_triple: string, extension: string): string) | nil
@@ -17,11 +17,11 @@ local download = {}
 function download.ensure_downloaded(options, callback)
   callback = vim.schedule_wrap(callback)
 
-  local files = require('blink.download.files').new(options.root_dir, options.output_dir, options.binary_name)
-  require('blink.download.cpath')(files.lib_folder)
+  local files = require('blink.lib.download.files').new(options.root_dir, options.output_dir, options.binary_name)
+  require('blink.lib.download.cpath')(files.lib_folder)
 
-  async.task
-    .await_all({ git.get_version(files.root_dir), files:get_version() })
+  task
+    .all({ git.get_version(files.root_dir), files:get_version() })
     :map(function(results) return { git = results[1], current = results[2] } end)
     :map(function(version)
       -- no version file found, user manually placed the .so file or build the plugin manually
@@ -44,7 +44,7 @@ function download.ensure_downloaded(options, callback)
 
       -- download
       if options.on_download then vim.schedule(function() options.on_download() end) end
-      local downloader = require('blink.download.downloader')
+      local downloader = require('blink.lib.download.downloader')
       return downloader.download(files, options.download_url, target_git_tag)
     end)
     :map(function() callback() end)

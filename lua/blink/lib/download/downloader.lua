@@ -1,13 +1,13 @@
-local async = require('blink.download.lib.async')
-local config = require('blink.download.config')
-local system = require('blink.download.system')
+local task = require('blink.lib.task')
+local config = require('blink.lib.download.config')
+local system = require('blink.lib.download.system')
 
 local downloader = {}
 
 --- @param files blink.download.Files
 --- @param get_download_url fun(version: string, system_triple: string, extension: string): string
 --- @param version string
---- @return blink.download.Task
+--- @return blink.lib.Task
 function downloader.download(files, get_download_url, version)
   -- set the version to 'v0.0.0' to avoid a failure causing the pre-built binary being marked as locally built
   return files
@@ -38,9 +38,9 @@ end
 --- @param files blink.download.Files
 --- @param url string
 --- @param filename string
---- @return blink.download.Task
+--- @return blink.lib.Task
 function downloader.download_file(files, url, filename)
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     local args = { 'curl' }
 
     -- Use https proxy if available

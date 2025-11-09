@@ -1,4 +1,4 @@
-local files = require('blink.download.files')
+local files = require('blink.lib.download.files')
 
 --- @type table<string, boolean>
 local cpath_set_by_module = {}

@@ -1,4 +1,4 @@
-local async = require('blink.download.lib.async')
+local task = require('blink.lib.task')
 
 --- @class blink.download.Files
 --- @field root_dir string
@@ -11,17 +11,17 @@ local async = require('blink.download.lib.async')
 ---
 --- @field new fun(root_dir: string, output_dir: string, binary_name: string): blink.download.Files
 ---
---- @field get_version fun(self: blink.download.Files): blink.download.Task
---- @field set_version fun(self: blink.download.Files, version: string): blink.download.Task
+--- @field get_version fun(self: blink.download.Files): blink.lib.Task
+--- @field set_version fun(self: blink.download.Files, version: string): blink.lib.Task
 ---
 --- @field get_lib_extension fun(): string Returns the extension for the library based on the current platform, including the dot (i.e. '.so' or '.dll')
 ---
---- @field read_file fun(path: string): blink.download.Task
---- @field write_file fun(path: string, data: string): blink.download.Task
---- @field exists fun(path: string): blink.download.Task
---- @field stat fun(path: string): blink.download.Task
---- @field create_dir fun(path: string): blink.download.Task
---- @field rename fun(old_path: string, new_path: string): blink.download.Task
+--- @field read_file fun(path: string): blink.lib.Task
+--- @field write_file fun(path: string, data: string): blink.lib.Task
+--- @field exists fun(path: string): blink.lib.Task
+--- @field stat fun(path: string): blink.lib.Task
+--- @field create_dir fun(path: string): blink.lib.Task
+--- @field rename fun(old_path: string, new_path: string): blink.lib.Task
 
 --- @type blink.download.Files
 --- @diagnostic disable-next-line: missing-fields
@@ -59,7 +59,7 @@ function files:get_version()
 end
 
 --- @param version string
---- @return blink.download.Task
+--- @return blink.lib.Task
 function files:set_version(version)
   return files
     .create_dir(self.root_dir .. '/target')
@@ -78,9 +78,9 @@ end
 --- Filesystem helpers ---
 
 --- @param path string
---- @return blink.download.Task
+--- @return blink.lib.Task
 function files.read_file(path)
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     vim.uv.fs_open(path, 'r', 438, function(open_err, fd)
       if open_err or fd == nil then return reject(open_err or 'Unknown error') end
       vim.uv.fs_read(fd, 1024, 0, function(read_err, data)
@@ -93,7 +93,7 @@ function files.read_file(path)
 end
 
 function files.write_file(path, data)
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     vim.uv.fs_open(path, 'w', 438, function(open_err, fd)
       if open_err or fd == nil then return reject(open_err or 'Unknown error') end
       vim.uv.fs_write(fd, data, 0, function(write_err)
@@ -106,13 +106,13 @@ function files.write_file(path, data)
 end
 
 function files.exists(path)
-  return async.task.new(function(resolve)
+  return task.new(function(resolve)
     vim.uv.fs_stat(path, function(err) resolve(not err) end)
   end)
 end
 
 function files.stat(path)
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     vim.uv.fs_stat(path, function(err, stat)
       if err then return reject(err) end
       resolve(stat)
@@ -128,7 +128,7 @@ function files.create_dir(path)
     :map(function(exists)
       if exists then return end
 
-      return async.task.new(function(resolve, reject)
+      return task.new(function(resolve, reject)
         vim.uv.fs_mkdir(path, 511, function(err)
           if err then return reject(err) end
           resolve()
@@ -138,7 +138,7 @@ function files.create_dir(path)
 end
 
 function files.rename(old_path, new_path)
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     vim.uv.fs_rename(old_path, new_path, function(err)
       if err then return reject(err) end
       resolve()
