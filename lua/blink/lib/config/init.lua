@@ -11,6 +11,7 @@
 local M = {}
 
 --- @param module_name string
+--- @param opts blink.lib.EnableOpts?
 function M.new_enable(module_name, opts)
   return {
     enable = function(enable, filter)
