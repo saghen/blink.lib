@@ -1,7 +1,21 @@
 local task = require('blink.lib.task')
 local uv = vim.uv
 
+--- @class blink.lib.fs
 local fs = {}
+
+--- @param path string
+--- @param flags string
+--- @param mode integer
+--- @return blink.lib.Task<integer>
+function fs.open(path, flags, mode)
+  return task.new(function(resolve, reject)
+    uv.fs_open(path, flags, mode, function(err, fd)
+      if err or fd == nil then return reject(err or 'Unknown error while opening file') end
+      resolve(fd)
+    end)
+  end)
+end
 
 --- Scans a directory asynchronously in chunks, calling a provided callback for each directory entry.
 --- The task resolves once all entries have been processed.
@@ -34,9 +48,6 @@ function fs.list(path, callback)
 end
 
 --- Equivalent to `preadv(2)`. Returns a string where an empty string indicates EOF
----
---- If `offset` is >= 0, nil or omitted, the current file offset will be ignored.
---- If `offset` is -1, the current file offset will be used and updated.
 --- @param path string
 --- @param size number
 --- @param offset number?
@@ -55,9 +66,6 @@ function fs.read(path, size, offset)
 end
 
 --- Equivalent to `pwritev(2)`. Returns the number of bytes written
----
---- If `offset` is >= 0, nil or omitted, the current file offset will be ignored.
---- If `offset` is -1, the current file offset will be used and updated.
 --- @param path string
 --- @param data string
 --- @param offset number?
@@ -113,6 +121,19 @@ function fs.mkdir(path, mode)
         end)
       end)
     end)
+end
+
+--- Equivalent to `rename(2)`
+--- @param old_path string
+--- @param new_path string
+--- @return blink.lib.Task<nil>
+function fs.rename(old_path, new_path)
+  return task.new(function(resolve, reject)
+    vim.uv.fs_rename(old_path, new_path, function(err)
+      if err then return reject(err) end
+      resolve()
+    end)
+  end)
 end
 
 return fs

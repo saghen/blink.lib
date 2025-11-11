@@ -2,6 +2,7 @@ local async = require('blink.cmp.lib.async')
 local utils = require('blink.cmp.lib.utils')
 local log_file = require('blink.cmp.fuzzy.build.log')
 
+--- @class blink.lib.build
 local build = {}
 
 --- Gets the path to the blink.cmp root directory (parent of lua/)

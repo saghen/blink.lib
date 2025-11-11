@@ -1,6 +1,6 @@
 local task = require('blink.lib.task')
 
---- @class blink.download.Git
+--- @class blink.lib.download.git
 local git = {}
 
 --- @param root_dir string

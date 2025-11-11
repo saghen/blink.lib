@@ -8,6 +8,7 @@
 --- @class blink.lib.EnableOpts
 --- @field callback? fun(enable: boolean, filter?: blink.lib.Filter) Note that `filter.bufnr = 0` will be replaced with the current buffer
 
+--- @class blink.lib.config
 local M = {}
 
 --- @param module_name string

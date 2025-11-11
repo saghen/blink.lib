@@ -3,13 +3,8 @@ local task = require('blink.lib.task')
 
 local system = {
   triples = {
-    mac = {
-      arm = 'aarch64-apple-darwin',
-      x64 = 'x86_64-apple-darwin',
-    },
-    windows = {
-      x64 = 'x86_64-pc-windows-msvc',
-    },
+    mac = { arm = 'aarch64-apple-darwin', x64 = 'x86_64-apple-darwin' },
+    windows = { x64 = 'x86_64-pc-windows-msvc' },
     linux = {
       android = 'aarch64-linux-android',
       arm = function(libc) return 'aarch64-unknown-linux-' .. libc end,
@@ -29,7 +24,7 @@ end
 
 --- Gets the system target triple from `cc -dumpmachine`
 --- I.e. 'gnu' | 'musl'
---- @return blink.download.Task
+--- @return blink.lib.Task<'gnu' | 'musl'>
 function system.get_linux_libc()
   return task
     -- Check for system libc via `cc -dumpmachine` by default
@@ -59,6 +54,7 @@ function system.get_linux_libc()
 end
 
 --- Same as `system.get_linux_libc` but synchronous
+--- @return 'gnu' | 'musl'
 function system.get_linux_libc_sync()
   local _, process = pcall(function() return vim.system({ 'cc', '-dumpmachine' }, { text = true }):wait() end)
   if process and process.code == 0 then
@@ -74,10 +70,10 @@ function system.get_linux_libc_sync()
 end
 
 --- Gets the system triple for the current system
---- I.e. `x86_64-unknown-linux-gnu` or `aarch64-apple-darwin`
---- @return blink.download.Task
+--- for example, `x86_64-unknown-linux-gnu` or `aarch64-apple-darwin`
+--- @return blink.lib.Task
 function system.get_triple()
-  return async.task.new(function(resolve, reject)
+  return task.new(function(resolve, reject)
     if config.force_system_triple then return resolve(config.force_system_triple) end
 
     local os, arch = system.get_info()
@@ -98,7 +94,7 @@ end
 
 --- Same as `system.get_triple` but synchronous
 --- @see system.get_triple
---- @return string | function | nil
+--- @return string?
 function system.get_triple_sync()
   if config.force_system_triple then return config.force_system_triple end
 

@@ -28,7 +28,7 @@ local STATUS = {
 ---Note that lua language server cannot infer the type of the task from the `resolve` call.
 ---
 ---You may need to add the type annotation explicitly via an `@return` annotation on a function returning the task, or via the `@cast/@type` annotations on the task variable.
---- @class blink.lib.Task<T>: { status: blink.lib.TaskStatus, result: T | nil, error: any | nil, _completion_cbs: fun(result: T)[], _failure_cbs: fun(err: any)[], _cancel_cbs: fun()[], _cancel: fun()?, __task: true }
+--- @class blink.lib.Task<T>: { status: blink.lib.TaskStatus, result: T, error: any | nil, _completion_cbs: fun(result: T)[], _failure_cbs: fun(err: any)[], _cancel_cbs: fun()[], _cancel: fun()?, __task: true }
 local task = {
   __task = true,
   STATUS = STATUS,

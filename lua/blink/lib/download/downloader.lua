@@ -1,10 +1,11 @@
 local task = require('blink.lib.task')
 local config = require('blink.lib.download.config')
 local system = require('blink.lib.download.system')
+local fs = require('blink.lib.fs')
 
 local downloader = {}
 
---- @param files blink.download.Files
+--- @param files blink.lib.download.files
 --- @param get_download_url fun(version: string, system_triple: string, extension: string): string
 --- @param version string
 --- @return blink.lib.Task
@@ -26,7 +27,7 @@ function downloader.download(files, get_download_url, version)
     )
     :map(
       function()
-        return files.rename(
+        return fs.rename(
           files.lib_folder .. '/' .. files.lib_filename .. '.tmp',
           files.lib_folder .. '/' .. files.lib_filename
         )
@@ -35,7 +36,7 @@ function downloader.download(files, get_download_url, version)
     :map(function() return files:set_version(version) end)
 end
 
---- @param files blink.download.Files
+--- @param files blink.lib.download.files
 --- @param url string
 --- @param filename string
 --- @return blink.lib.Task
