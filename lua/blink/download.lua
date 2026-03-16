@@ -1,1 +1,1 @@
-return require('blink.lib.download')
+return require('blink.lib.build.download')
