@@ -13,7 +13,7 @@ function downloader.download(files, get_download_url, version)
   -- set the version to 'v0.0.0' to avoid a failure causing the pre-built binary being marked as locally built
   return files
     :set_version('v0.0.0')
-    -- Get system trip
+    -- get system triple
     :map(function() return system.get_triple() end)
     :map(function(system_triple)
       if not system_triple then return error('Your system is not supported by pre-built binaries') end

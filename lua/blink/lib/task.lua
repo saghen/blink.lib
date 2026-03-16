@@ -81,6 +81,22 @@ function task.new(fn)
   return self
 end
 
+--- Similar to `new()` but for wrapping callback functions.
+--- Instead of `resolve` and `reject`, a callback function will `reject` when
+--- the first field (`err`) is not `nil`. Otherwise, it will resolve with
+--- the second field (`result`).
+--- @generic T
+--- @param fn fun(callback: fun(err: any, result: T))
+--- @return blink.lib.Task<T>
+function task.wrap(fn)
+  return task.new(function(resolve, reject)
+    fn(function(err, result)
+      if err ~= nil then return reject(err) end
+      resolve(result)
+    end)
+  end)
+end
+
 --- @param self blink.lib.Task<any>
 function task:cancel()
   if self.status ~= STATUS.RUNNING then return end

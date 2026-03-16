@@ -17,12 +17,20 @@ function fs.open(path, flags, mode)
   end)
 end
 
+--- Scans a directory asynchronously
+--- @param path string
+--- @return blink.lib.Task
+function fs.list(path)
+  local chunks = {}
+  return fs.list_chunked(path, function(entries) vim.list_extend(chunks, entries) end):map(function() return chunks end)
+end
+
 --- Scans a directory asynchronously in chunks, calling a provided callback for each directory entry.
 --- The task resolves once all entries have been processed.
 --- @param path string
 --- @param callback fun(entries: table[]) Callback function called with an array (chunk) of directory entries
 --- @return blink.lib.Task
-function fs.list(path, callback)
+function fs.list_chunked(path, callback)
   local chunk_size = 200
 
   return task.new(function(resolve, reject)
@@ -31,7 +39,7 @@ function fs.list(path, callback)
       local entries = {}
       local function send_chunk()
         if #entries > 0 then
-          vim.schedule_wrap(callback)(entries)
+          callback(entries)
           entries = {}
         end
       end
@@ -95,12 +103,7 @@ end
 --- @param path string
 --- @return blink.lib.Task<uv.aliases.fs_stat_table>
 function fs.stat(path)
-  return task.new(function(resolve, reject)
-    vim.uv.fs_stat(path, function(err, stat)
-      if err then return reject(err) end
-      resolve(stat)
-    end)
-  end)
+  return task.wrap(function(cb) vim.uv.fs_stat(path, cb) end)
 end
 
 --- Creates a directory (non-recursive), no-op if the directory already exists
@@ -113,13 +116,7 @@ function fs.mkdir(path, mode)
     :catch(function() return false end)
     :map(function(exists)
       if exists then return end
-
-      return task.new(function(resolve, reject)
-        vim.uv.fs_mkdir(path, mode or 511, function(err)
-          if err then return reject(err) end
-          resolve()
-        end)
-      end)
+      return task.wrap(function(cb) vim.uv.fs_mkdir(path, mode or 511, cb) end)
     end)
 end
 
@@ -128,12 +125,23 @@ end
 --- @param new_path string
 --- @return blink.lib.Task<nil>
 function fs.rename(old_path, new_path)
-  return task.new(function(resolve, reject)
-    vim.uv.fs_rename(old_path, new_path, function(err)
-      if err then return reject(err) end
-      resolve()
-    end)
-  end)
+  return task.wrap(function(cb) vim.uv.fs_rename(old_path, new_path, cb) end)
+end
+
+--- Ensures a trailing slash is present
+--- @param path string
+--- @return string
+function fs.ensure_trailing_slash(path)
+  if path:sub(#path, #path) ~= '/' then return path .. '/' end
+  return path
+end
+
+--- Ensures a leading slash is *not* present
+--- @param path string
+--- @return string
+function fs.remove_leading_slash(path)
+  if path:sub(1, 1) == '/' then return path:sub(2) end
+  return path
 end
 
 return fs

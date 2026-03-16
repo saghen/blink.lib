@@ -13,9 +13,8 @@ local M = {}
 --- @param binary_name string
 --- @return blink.lib.download.files
 function M.new(root_dir, output_dir, binary_name)
-  -- Normalize trailing and leading slashes
-  if root_dir:sub(#root_dir, #root_dir) ~= '/' then root_dir = root_dir .. '/' end
-  if output_dir:sub(1, 1) == '/' then output_dir = output_dir:sub(2) end
+  root_dir = fs.ensure_trailing_slash(root_dir)
+  output_dir = fs.remove_leading_slash(output_dir)
 
   local lib_folder = root_dir .. output_dir
   local lib_filename = 'lib' .. binary_name .. M.get_lib_extension()
@@ -35,7 +34,7 @@ end
 --- @return blink.lib.Task<{ version?: string; missing?: boolean }>
 function M:get_version()
   return fs.read(self.version_path, 1024)
-    :map(function(version) return { version = version } end)
+    :map(function(version) return { version = version, missing = false } end)
     :catch(function() return { missing = true } end)
 end
 

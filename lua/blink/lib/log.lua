@@ -1,4 +1,5 @@
 --- @class blink.lib.Logger
+--- @field path string
 --- @field set_min_level fun(level: number)
 --- @field open fun()
 --- @field log fun(level: number, msg: string, ...: any)
@@ -7,6 +8,15 @@
 --- @field info fun(msg: string, ...: any)
 --- @field warn fun(msg: string, ...: any)
 --- @field error fun(msg: string, ...: any)
+
+--- @class blink.lib.LoggerTransportOptions
+--- @field enabled? boolean
+--- @field min_log_level? number
+
+--- @class blink.lib.LoggerOptions
+--- @field module_name string
+--- @field console? blink.lib.LoggerTransportOptions
+--- @field file? blink.lib.LoggerTransportOptions
 
 local levels_to_str = {
   [vim.log.levels.TRACE] = 'TRACE',
@@ -19,21 +29,47 @@ local levels_to_str = {
 --- @class blink.lib.log
 local M = {}
 
---- @param module_name string
---- @param min_log_level? number
+--- @param opts blink.lib.LoggerOptions
 --- @return blink.lib.Logger
-function M.new(module_name, min_log_level)
-  min_log_level = min_log_level or vim.log.levels.INFO
+function M.new(opts)
+  opts.console = opts.console or {}
+  opts.console.enabled = opts.console.enabled == nil or opts.console.enabled
+  opts.console.min_log_level = opts.console.min_log_level or vim.log.levels.INFO
+
+  opts.file = opts.file or {}
+  opts.file.enabled = opts.file.enabled == nil or opts.file.enabled
+  opts.file.min_log_level = opts.file.min_log_level or vim.log.levels.INFO
 
   local queued_lines = {}
-  local path = vim.fn.stdpath('log') .. '/' .. module_name .. '.log'
+  local path = vim.fn.stdpath('log') .. '/' .. opts.module_name .. '.log'
   local fd
 
-  vim.uv.fs_open(path, 'a', 438, function(err, _fd)
-    if err or _fd == nil then
-      fd = nil
+  -- we dont want to spam errors, so if we fail to open or write to the file, ignore future attempts
+  local failed = false
+  local function write(msg)
+    if fd == nil or failed then
+      -- havent yet opened file
+      if not failed then table.insert(queued_lines, msg) end
+      return
+    end
+
+    vim.uv.fs_write(fd, msg .. '\n', function(write_err)
+      if write_err ~= nil and not failed then
+        failed = true
+        vim.notify(
+          'Failed to write to log file at ' .. path .. ' for module ' .. opts.module_name .. ': ' .. write_err,
+          vim.log.levels.ERROR
+        )
+      end
+    end)
+  end
+
+  -- open log file and write queued lines
+  vim.uv.fs_open(path, 'a', 438, function(open_err, _fd)
+    if open_err or _fd == nil then
+      failed = true
       vim.notify(
-        'Failed to open log file at ' .. path .. ' for module ' .. module_name .. ': ' .. (err or 'Unknown error'),
+        'Failed to open log file at ' .. path .. ' for module ' .. opts.module_name .. ': ' .. open_err,
         vim.log.levels.ERROR
       )
       return
@@ -41,10 +77,7 @@ function M.new(module_name, min_log_level)
 
     fd = _fd
 
-    for _, line in ipairs(queued_lines) do
-      local _, _, write_err_msg = vim.uv.fs_write(fd, line, 0)
-      if write_err_msg ~= nil then error('Failed to write to log file: ' .. (write_err_msg or 'Unknown error')) end
-    end
+    write(table.concat(queued_lines, '\n'))
     queued_lines = {}
   end)
 
@@ -52,31 +85,41 @@ function M.new(module_name, min_log_level)
   --- @param msg string
   --- @param ... any
   local function log(level, msg, ...)
-    -- failed to initialize, ignore
-    if fd == false then return end
+    if level < opts.console.min_log_level and level < opts.file.min_log_level then return end
 
-    if level < min_log_level then return end
-    if #... > 0 then msg = msg:format(...) end
-
-    local line = levels_to_str[level] .. ': ' .. msg .. '\n'
-
-    if fd == nil then
-      table.insert(queued_lines, line)
-    else
-      local _, _, write_err_msg = vim.uv.fs_write(fd, line, 0)
-      if write_err_msg ~= nil then error('Failed to write to log file: ' .. (write_err_msg or 'Unknown error')) end
+    -- if there are args, use `vim.inspect` to format non-primitives
+    -- and `string.format` with the `msg`
+    if select('#', ...) > 0 then
+      local args = {}
+      for i = 1, select('#', ...) do
+        local o = select(i, ...)
+        local type = type(o)
+        if type == 'table' or type == 'function' or type == 'userdata' then
+          table.insert(args, vim.inspect(o, { newline = '\n', indent = '  ' }))
+        else
+          table.insert(args, o)
+        end
+      end
+      msg = msg:format(args)
     end
+
+    msg = levels_to_str[level] .. ': ' .. msg .. '\n'
+
+    if level >= opts.console.min_log_level then print(msg) end
+    if level >= opts.file.min_log_level then write(msg) end
   end
 
   return {
-    set_min_level = function(level) min_log_level = level end,
+    path = path,
+    set_file_min_level = function(level) opts.file.min_log_level = level end,
+    set_console_min_level = function(level) opts.console.min_log_level = level end,
     open = function() vim.cmd('edit ' .. path) end,
     log = log,
-    trace = function(msg, ...) log(vim.log.levels.TRACE, msg, ...) end,
-    debug = function(msg, ...) log(vim.log.levels.DEBUG, msg, ...) end,
-    info = function(msg, ...) log(vim.log.levels.INFO, msg, ...) end,
-    warn = function(msg, ...) log(vim.log.levels.WARN, msg, ...) end,
-    error = function(msg, ...) log(vim.log.levels.ERROR, msg, ...) end,
+    trace = function(...) log(vim.log.levels.TRACE, ...) end,
+    debug = function(...) log(vim.log.levels.DEBUG, ...) end,
+    info = function(...) log(vim.log.levels.INFO, ...) end,
+    warn = function(...) log(vim.log.levels.WARN, ...) end,
+    error = function(...) log(vim.log.levels.ERROR, ...) end,
   }
 end
 

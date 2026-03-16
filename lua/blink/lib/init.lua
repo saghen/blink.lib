@@ -9,6 +9,10 @@ local function lazy_require(module_name)
       if module == nil then module = require(module_name) end
       module[key] = value
     end,
+    __call = function(_, ...)
+      if module == nil then module = require(module_name) end
+      return module(...)
+    end,
   })
 end
 
@@ -25,4 +29,8 @@ return {
   log = lazy_require('blink.lib.log'),
   --- @type blink.lib.Task
   task = lazy_require('blink.lib.task'),
+  --- @type blink.lib.nvim
+  nvim = lazy_require('blink.lib.nvim'),
+  --- @type blink.lib.timer
+  timer = lazy_require('blink.lib.timer'),
 }
