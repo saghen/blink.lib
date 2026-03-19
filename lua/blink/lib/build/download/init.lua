@@ -38,7 +38,7 @@ function download.ensure_downloaded(opts)
       end
 
       -- already downloaded and the correct version
-      if version.current.tag == target_git_tag then return end
+      if version.current.version == target_git_tag then return end
 
       -- download
       if opts.on_download then vim.schedule(function() opts.on_download() end) end
