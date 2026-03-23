@@ -53,7 +53,7 @@ function M.new(opts)
       return
     end
 
-    vim.uv.fs_write(fd, msg .. '\n', function(write_err)
+    vim.uv.fs_write(fd, msg .. '\n', nil, function(write_err)
       if write_err ~= nil and not failed then
         failed = true
         vim.notify(
