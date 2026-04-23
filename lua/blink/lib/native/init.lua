@@ -106,16 +106,9 @@ end
 --- Recursively creates a directory, no-op if the directory already exists
 --- @param path string
 function native.mkdirp(path)
-  vim.uv.fs_mkdir(path, 493, function(err)
-    if err then
-      -- parent might not exist, try creating it first
-      local parent = vim.fs.dirname(path)
-      if parent and parent ~= path then
-        native.mkdirp(parent)
-        vim.uv.fs_mkdir(path, 493)
-      end
-    end
-  end)
+  -- Synchronous so callers (like `native.mv`) can safely write into `path`
+  -- immediately afterwards without racing the directory creation.
+  vim.fn.mkdir(path, 'p')
 end
 
 --- Move a file from one location to another, creating all intermediate directories at dst
