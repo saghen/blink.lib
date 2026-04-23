@@ -189,10 +189,16 @@ function native.try_git_commit(path)
 end
 
 --- @param path string Path to the repository root or some path inside the repository
+--- @param tag string Tag to check for existence (e.g. 'v1.*')
 --- @return string? tag For example 'v0.0.1'
-function native.git_tag(path)
-  local process = vim.system({ 'git', 'describe', '--tags', '--exact-match' }, { cwd = path }):wait(1000)
-  if process.code == 0 then return process.stdout:match('(%w+)\n') end
+function native.git_tag(path, tag)
+  path = vim.fs.root(path, '.git') or path
+  local process = vim.system({ 'git', 'describe', '--tags', '--match', tag }, { cwd = path }):wait(1000)
+  if process.code == 0 and process.stdout then
+    local version = vim.version.parse(process.stdout)
+    if version then return ('v%d.%d.%d'):format(version.major, version.minor, version.patch) end
+    return process.stdout:match('(%w+)\n')
+  end
 end
 
 return native
