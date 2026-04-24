@@ -133,18 +133,20 @@ end
 function task:map(fn)
   return task.new(function(resolve, reject, cancel)
     self:on_resolve(function(result)
-      local success, mapped_result = pcall(fn, result)
-      if not success then return reject(mapped_result) end
+      vim.schedule(function()
+        local success, mapped_result = pcall(fn, result)
+        if not success then return reject(mapped_result) end
 
-      -- received a task object, chain it
-      if type(mapped_result) == 'table' and mapped_result.__task then
-        --- @cast mapped_result blink.lib.Task<`U`>
-        mapped_result:on_resolve(resolve)
-        mapped_result:on_reject(reject)
-        mapped_result:on_cancel(cancel)
-      else
-        resolve(mapped_result)
-      end
+        -- received a task object, chain it
+        if type(mapped_result) == 'table' and mapped_result.__task then
+          --- @cast mapped_result blink.lib.Task<`U`>
+          mapped_result:on_resolve(resolve)
+          mapped_result:on_reject(reject)
+          mapped_result:on_cancel(cancel)
+        else
+          resolve(mapped_result)
+        end
+      end)
     end)
     self:on_reject(reject)
     self:on_cancel(cancel)
