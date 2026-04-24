@@ -62,7 +62,7 @@ end
 --- @param path string Where to save the library
 --- @param callback fun(err: string)
 function native.download(url, path, callback)
-  vim.fn.mkdir(vim.fs.dirname(path), 'p')
+  native.mkdirp(vim.fs.dirname(path))
   vim.net.request(url, { outpath = path }, function(err) callback(err) end)
 end
 
