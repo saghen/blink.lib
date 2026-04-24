@@ -193,15 +193,10 @@ end
 --- @param match? string Tag to check for existence (e.g. 'v1.*')
 --- @return string? tag For example 'v0.0.1'
 function native.git_tag(path, match)
-  path = vim.fs.root(path, '.git') or path
-  local cmd = match and { 'git', 'describe', '--tags', '--match', match }
+  local cmd = match and { 'git', 'describe', '--tags', '--match', match, '--abbrev=0' }
     or { 'git', 'describe', '--tags', '--exact-match' }
   local process = vim.system(cmd, { cwd = path }):wait(1000)
-  if process.code == 0 and process.stdout then
-    local version = vim.version.parse(process.stdout)
-    if version then return ('v%d.%d.%d'):format(version.major, version.minor, version.patch) end
-    return process.stdout:match('(%w+)\n')
-  end
+  if process.code == 0 and process.stdout then return process.stdout:match('(%w+)\n') end
 end
 
 return native
