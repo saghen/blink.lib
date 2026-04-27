@@ -172,20 +172,15 @@ end
 --- @param futures blink.lib.Future<T>[]
 --- @return T...
 function async.any(futures)
-  -- TODO: can this be simplified?
   return async.wrap(function(callback)
     local remaining = #futures
-    local settled = false
     for _, future in ipairs(futures) do
       future:_finally(function(ok, ...)
-        if settled then return end
-        remaining = remaining - 1
         if ok then
-          settled = true
           callback(nil, ...)
-        elseif remaining == 0 then
-          settled = true
-          callback('all futures rejected')
+        else
+          remaining = remaining - 1
+          if remaining == 0 then callback('all futures rejected') end
         end
       end)
     end
