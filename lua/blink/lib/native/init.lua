@@ -206,7 +206,7 @@ function native.git_tag(path, match)
   local cmd = match and { 'git', 'describe', '--tags', '--match', match, '--abbrev=0' }
     or { 'git', 'describe', '--tags', '--exact-match' }
   local process = vim.system(cmd, { cwd = path }):wait(1000)
-  if process.code == 0 and process.stdout then return process.stdout:match('(%w+)\n') end
+  if process.code == 0 and process.stdout then return process.stdout:match('([%w%.]+)\n') end
 end
 
 return native
