@@ -20,16 +20,24 @@ local function bench(store, name, iters, fn, is_async)
     run()
   end
   collectgarbage('collect')
+  collectgarbage('stop')
 
+  local mem_start = collectgarbage('count')
   local start = vim.uv.hrtime()
   for _ = 1, iters do
     run()
   end
   local elapsed = vim.uv.hrtime() - start
+  local mem_end = collectgarbage('count')
+
+  collectgarbage('restart')
+  collectgarbage('collect')
+
+  local mem_per_op = (mem_end - mem_start) * 1024 / iters -- bytes per op
 
   if not store[name] then ordered_names[#ordered_names + 1] = name end
-  store[name] = elapsed / iters
-  print(string.format('  %-50s %10d iter  %10.3f µs/op', name, iters, elapsed / iters / 1e3))
+  store[name] = { time = elapsed / iters, mem = mem_per_op }
+  print(string.format('  %-50s %10d iter  %10.3f µs/op  %10.2f B/op', name, iters, elapsed / iters / 1e3, mem_per_op))
 end
 
 ------------------
@@ -38,7 +46,7 @@ end
 
 local blink_adapter = {
   run = blink.run,
-  await_task = function(t) return t:await() end,
+  await_future = blink.await,
   await_cb = blink.wrap,
   await_cb_deferred = function() return blink.wrap(vim.schedule) end,
   cancel = function(t) t:cancel() end,
@@ -58,7 +66,7 @@ local blink_adapter = {
 
 local nvim_adapter = {
   run = nvim.run,
-  await_task = nvim.await,
+  await_future = nvim.await,
   await_cb = nvim.await,
   await_cb_deferred = function() return nvim.await(vim.schedule) end,
   cancel = function(t) t:close() end,
@@ -87,7 +95,7 @@ local nvim_adapter = {
 local function make_suite(a)
   local sync_cb = function(cb) cb() end
   return {
-    { section = 'Task creation & synchronous completion' },
+    { section = 'Future creation & synchronous completion' },
     {
       'run with empty fn (sync resolve)',
       100000,
@@ -173,24 +181,24 @@ local function make_suite(a)
       end,
     },
 
-    { section = 'Task:await' },
+    { section = 'Future:await' },
     {
-      'await already-resolved task',
+      'await already-resolved future',
       50000,
       async = true,
       function()
         local resolved = a.run(function() return 1 end)
-        return a.run(function() a.await_task(resolved) end)
+        return a.run(function() a.await_future(resolved) end)
       end,
     },
     {
-      'await chain of 10 tasks',
+      'await chain of 10 futures',
       5000,
       async = true,
       function()
         return a.run(function()
           for _ = 1, 10 do
-            a.await_task(a.run(function() return 1 end))
+            a.await_future(a.run(function() return 1 end))
           end
         end)
       end,
@@ -198,33 +206,33 @@ local function make_suite(a)
 
     { section = 'Parent/child relationships' },
     {
-      'spawn 10 child tasks (awaited)',
+      'spawn 10 child futures (awaited)',
       5000,
       async = true,
       function()
         return a.run(function()
-          local tasks = {}
+          local futures = {}
           for i = 1, 10 do
-            tasks[i] = a.run(function() return i end)
+            futures[i] = a.run(function() return i end)
           end
-          for _, t in ipairs(tasks) do
-            a.await_task(t)
+          for _, t in ipairs(futures) do
+            a.await_future(t)
           end
         end)
       end,
     },
     {
-      'spawn 100 child tasks (awaited)',
+      'spawn 100 child futures (awaited)',
       500,
       async = true,
       function()
         return a.run(function()
-          local tasks = {}
+          local futures = {}
           for i = 1, 100 do
-            tasks[i] = a.run(function() return i end)
+            futures[i] = a.run(function() return i end)
           end
-          for _, t in ipairs(tasks) do
-            a.await_task(t)
+          for _, t in ipairs(futures) do
+            a.await_future(t)
           end
         end)
       end,
@@ -237,7 +245,7 @@ local function make_suite(a)
         local function nest(depth)
           return a.run(function()
             if depth == 0 then return 0 end
-            return a.await_task(nest(depth - 1)) + 1
+            return a.await_future(nest(depth - 1)) + 1
           end)
         end
         return nest(50)
@@ -246,14 +254,14 @@ local function make_suite(a)
 
     { section = 'Cancellation' },
     {
-      'cancel pending task (no cleanup)',
+      'cancel pending future (no cleanup)',
       50000,
       function()
         a.cancel(a.run(function() a.await_never() end))
       end,
     },
     {
-      'cancel pending task (with cleanup hook)',
+      'cancel pending future (with cleanup hook)',
       50000,
       function()
         a.cancel(a.run(function() a.await_never_cleanup() end))
@@ -305,28 +313,28 @@ local function make_suite(a)
 
     { section = 'pwait / wait variants' },
     {
-      'Task:wait on resolved task',
+      'Future:wait on resolved future',
       100000,
       function()
         a.wait_sync(a.run(function() return 1 end))
       end,
     },
     {
-      'Task:pwait on resolved task',
+      'Future:pwait on resolved future',
       100000,
       function()
         a.pwait_sync(a.run(function() return 1 end))
       end,
     },
     {
-      'Task:pwait on rejected task',
+      'Future:pwait on rejected future',
       100000,
       function()
         a.pwait_sync(a.run(function() error('x', 0) end))
       end,
     },
     {
-      'Task:wait with callback (resolved)',
+      'Future:wait with callback (resolved)',
       100000,
       function()
         a.wait_cb(a.run(function() return 1 end), function() end)
@@ -342,7 +350,7 @@ local function make_suite(a)
         return a.run(function()
           local sum = 0
           for i = 1, 10 do
-            sum = sum + a.await_task(a.run(function() return i * 2 end))
+            sum = sum + a.await_future(a.run(function() return i * 2 end))
           end
           return sum
         end)
@@ -354,16 +362,16 @@ local function make_suite(a)
       async = true,
       function()
         return a.run(function()
-          local tasks = {}
+          local futures = {}
           for i = 1, 20 do
-            tasks[i] = a.run(function()
+            futures[i] = a.run(function()
               a.await_cb(sync_cb)
               return i
             end)
           end
           local sum = 0
-          for _, t in ipairs(tasks) do
-            sum = sum + a.await_task(t)
+          for _, t in ipairs(futures) do
+            sum = sum + a.await_future(t)
           end
           return sum
         end)
@@ -377,7 +385,7 @@ end
 ------------------
 
 local function run_suite(label, adapter, store)
-  print('\n' .. string.rep('=', 80) .. '\n' .. label .. '\n' .. string.rep('=', 80))
+  print('\n' .. string.rep('=', 95) .. '\n' .. label .. '\n' .. string.rep('=', 95))
   for _, e in ipairs(make_suite(adapter)) do
     if e.section then
       print('\n── ' .. e.section .. ' ' .. string.rep('─', 60 - #e.section))
@@ -394,26 +402,62 @@ run_suite('async.nvim', nvim_adapter, results.nvim)
 --- Comparison table
 ------------------
 
-print('\n' .. string.rep('=', 90))
+print('\n' .. string.rep('=', 120))
 print('Comparison (blink.lib.async vs async.nvim)')
-print(string.rep('=', 90))
-print(string.format('  %-50s %14s %14s %10s', 'benchmark', 'nvim µs/op', 'blink µs/op', 'Δ%'))
-print('  ' .. string.rep('-', 89))
+print(string.rep('=', 120))
+print(
+  string.format(
+    '  %-50s %12s %12s %8s %12s %12s %8s',
+    'benchmark',
+    'nvim µs/op',
+    'blink µs/op',
+    'Δ time%',
+    'nvim B/op',
+    'blink B/op',
+    'Δ mem%'
+  )
+)
+print('  ' .. string.rep('-', 119))
 
-local sum_b, sum_n, best_b, best_n = 0, 0, 0, 0
+local sum_b_t, sum_n_t = 0, 0
+local sum_b_m, sum_n_m = 0, 0
+local best_b_t, best_n_t = 0, 0
+local best_b_m, best_n_m = 0, 0
 for _, name in ipairs(ordered_names) do
   local b, nv = results.blink[name], results.nvim[name]
   if b and nv then
-    local diff = (b - nv) / nv * 100
-    if diff > 0 then
-      best_b = best_b + 1
+    local diff_t = (b.time - nv.time) / nv.time * 100
+    local diff_m
+    if nv.mem == 0 then
+      diff_m = b.mem == 0 and 0 or math.huge
     else
-      best_n = best_n + 1
+      diff_m = (b.mem - nv.mem) / nv.mem * 100
     end
-    print(string.format('  %-49s %14.3f%14.3f %+9.1f%%', name, nv / 1e3, b / 1e3, diff))
-    sum_b, sum_n = sum_b + b, sum_n + nv
+
+    if diff_t > 0 then
+      best_n_t = best_n_t + 1
+    else
+      best_b_t = best_b_t + 1
+    end
+    if diff_m > 0 then
+      best_n_m = best_n_m + 1
+    else
+      best_b_m = best_b_m + 1
+    end
+
+    print(
+      string.format(
+        '  %-49s %12.3f %12.3f %+7.1f%% %12.2f %12.2f %+7.1f%%',
+        name,
+        nv.time / 1e3,
+        b.time / 1e3,
+        diff_t,
+        nv.mem,
+        b.mem,
+        diff_m
+      )
+    )
+    sum_b_t, sum_n_t = sum_b_t + b.time, sum_n_t + nv.time
+    sum_b_m, sum_n_m = sum_b_m + b.mem, sum_n_m + nv.mem
   end
 end
-
-print('  ' .. string.rep('-', 89))
-print(string.rep('=', 90))

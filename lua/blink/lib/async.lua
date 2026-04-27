@@ -10,7 +10,7 @@
 --- Remaining work:
 --- - semaphores
 --- - improve stack traces
---- - add `Task:detach()`
+--- - add `Future:detach()`
 --- - expand test suite (`pwait`, `async.all`, `async.any`, ...)
 --- - expand helpers (`async.schedule`, `async.iter`, ...)
 
@@ -24,20 +24,20 @@ local RESOLVED = 3
 local REJECTED = 4
 local CANCELLED = 5
 
--- Track the currently-running task (the "parent" context)
-local current_task = nil
+-- Track the currently-running future (the "parent" context)
+local current_future = nil
 
---- @class blink.lib.Task<T>
-local Task = {}
+--- @class blink.lib.Future<T>
+local Future = {}
 --- @private
-Task.__index = Task
+Future.__index = Future
 
 --- @class blink.lib.async
 local async = {}
 
 --- Run a function in an async context, asynchronously.
 ---
---- Returns an [blink.lib.Task] object which can be used to wait or await the result
+--- Returns an [blink.lib.Future] object which can be used to wait or await the result
 --- of the function.
 ---
 --- ```lua
@@ -58,45 +58,45 @@ local async = {}
 ---
 --- @generic T
 --- @param fn fun(): T...
---- @return blink.lib.Task<T...>
+--- @return blink.lib.Future<T...>
 function async.run(fn)
-  local task = setmetatable({ state = PENDING, parent = current_task }, Task)
+  local future = setmetatable({ state = PENDING, parent = current_future }, Future)
   local co = coroutine.create(fn)
 
   -- register with parent
-  if current_task ~= nil then
-    if current_task.children == nil then
-      current_task.children = { task }
+  if current_future ~= nil then
+    if current_future.children == nil then
+      current_future.children = { future }
     else
-      table.insert(current_task.children, task)
+      table.insert(current_future.children, future)
     end
   end
 
   local function step(ok, ...)
     -- cancelled while suspended
-    if task.state ~= PENDING then return end
+    if future.state ~= PENDING then return end
 
-    local prev = current_task
-    current_task = task
+    local prev = current_future
+    current_future = future
     local yielded = pack(coroutine.resume(co, ok, ...))
-    current_task = prev
+    current_future = prev
 
     -- synchronously failed
     if not yielded[1] then
-      task:reject(unpack(yielded, 2))
-    elseif #yielded == 2 and getmetatable(yielded[2]) == Task then
-      -- synchronously returned a task, flatten
+      future:reject(unpack(yielded, 2))
+    elseif #yielded == 2 and getmetatable(yielded[2]) == Future then
+      -- synchronously returned a future, flatten
       -- async.run(function() return async.run(function() sleep(1) end) end)
       if coroutine.status(co) == 'dead' then
-        task:resolve(yielded[2])
-      -- async.await(task): inside of current task
+        future:resolve(yielded[2])
+      -- async.await(future): inside of current future
       else
         yielded[2]:_finally(step)
       end
 
     -- coroutine completed, resolve
     elseif coroutine.status(co) == 'dead' then
-      task:resolve(unpack(yielded, 2))
+      future:resolve(unpack(yielded, 2))
 
     -- async.wrap(fn): pass callback that resumes the coroutine
     elseif #yielded == 2 and type(yielded[2]) == 'function' then
@@ -104,7 +104,7 @@ function async.run(fn)
       local callback = function(err, ...)
         if settled then return end
         settled = true
-        task.cleanup = nil
+        future.cleanup = nil
         if err ~= nil then
           step(false, err)
         else
@@ -118,15 +118,15 @@ function async.run(fn)
         callback(on_cancel_or_err)
       -- cancellation hook
       elseif type(on_cancel_or_err) == 'function' then
-        task.cleanup = on_cancel_or_err
+        future.cleanup = on_cancel_or_err
       end
     else
-      task:reject('yielded unexpected value')
+      future:reject('yielded unexpected value')
     end
   end
   step()
 
-  return task
+  return future
 end
 
 --- Wrap a callback-style function into an async function.
@@ -139,30 +139,30 @@ function async.wrap(fn)
   return unpack(yielded, 2)
 end
 
---- Return the results of all tasks, or error if any task rejects.
+--- Return the results of all futures, or error if any future rejects.
 --- All children will be implicitly cancelled on failure.
 --- @generic T
---- @param tasks blink.lib.Task<T>[]
+--- @param futures blink.lib.Future<T>[]
 --- @return T[]
-function async.all(tasks)
+function async.all(futures)
   local results = {}
-  for i, task in ipairs(tasks) do
-    results[i] = async.await(task)
+  for i, future in ipairs(futures) do
+    results[i] = async.await(future)
   end
   return results
 end
 
---- Return the first task to settle, or error if all tasks reject.
+--- Return the first future to settle, or error if all futures reject.
 --- @generic T
---- @param tasks blink.lib.Task<T>[]
+--- @param futures blink.lib.Future<T>[]
 --- @return T...
-function async.any(tasks)
+function async.any(futures)
   -- TODO: can this be simplified?
   return async.wrap(function(callback)
-    local remaining = #tasks
+    local remaining = #futures
     local settled = false
-    for _, task in ipairs(tasks) do
-      task:_finally(function(ok, ...)
+    for _, future in ipairs(futures) do
+      future:_finally(function(ok, ...)
         if settled then return end
         remaining = remaining - 1
         if ok then
@@ -170,40 +170,40 @@ function async.any(tasks)
           callback(nil, ...)
         elseif remaining == 0 then
           settled = true
-          callback('all tasks rejected')
+          callback('all futures rejected')
         end
       end)
     end
 
     -- propagate cancellation
     return function()
-      for _, task in ipairs(tasks) do
-        task:cancel()
+      for _, future in ipairs(futures) do
+        future:cancel()
       end
     end
   end)
 end
 
---- Wait for this task to settle (blocking). Must be called from within a `async.run` closure.
+--- Wait for this future to settle (blocking). Must be called from within a `async.run` closure.
 --- @generic T
---- @param task blink.lib.Task<T>
+--- @param future blink.lib.Future<T>
 --- @return T...
-function async.await(task)
-  local yielded = pack(coroutine.yield(task))
+function async.await(future)
+  local yielded = pack(coroutine.yield(future))
   if not yielded[1] then error(yielded[2], 0) end
   return unpack(yielded, 2)
 end
 
 ------------------
---- Task
+--- Future
 ------------------
 
---- Wait for this task to settle, optionally with a timeout (blocking) or callback (non-blocking)
+--- Wait for this future to settle, optionally with a timeout (blocking) or callback (non-blocking)
 --- @generic T
---- @param self blink.lib.Task<T>
+--- @param self blink.lib.Future<T>
 --- @param timeout_or_cb? integer | fun(err?: any, ...?: T...)
 --- @overload fun(timeout?: integer): T...
-function Task:wait(timeout_or_cb)
+function Future:wait(timeout_or_cb)
   if type(timeout_or_cb) == 'function' then
     return self:_finally(function(ok, ...)
       if ok then
@@ -220,20 +220,20 @@ function Task:wait(timeout_or_cb)
   error(self.values[1], 0)
 end
 
---- Wait for this task to settle in _protected_ mode, optionally with a timeout (blocking) or callback (non-blocking).
+--- Wait for this future to settle in _protected_ mode, optionally with a timeout (blocking) or callback (non-blocking).
 --- This means that any error inside `f` is not propagated. Instead, `pwait` catches the error and returns whether the
---- task succeeded or not, along with the return values.
+--- future succeeded or not, along with the return values.
 --- @generic T
---- @param self blink.lib.Task<T>
+--- @param self blink.lib.Future<T>
 --- @param timeout_or_cb? integer | fun(ok: boolean, ...: T...)
 --- @overload fun(timeout?: integer): boolean, T...
-function Task:pwait(timeout_or_cb)
+function Future:pwait(timeout_or_cb)
   if type(timeout_or_cb) == 'function' then return self:_finally(timeout_or_cb) end
   return pcall(self.wait, self, timeout_or_cb)
 end
 
 --- @return 'pending' | 'settling' | 'resolved' | 'rejected' | 'cancelled'
-function Task:status()
+function Future:status()
   if self.state == PENDING then return 'pending' end
   if self.state == SETTLING then return 'settling' end
   if self.state == RESOLVED then return 'resolved' end
@@ -246,18 +246,18 @@ end
 --- Settlement
 ------------------
 
---- Resolve this task with a value
+--- Resolve this future with a value
 --- @generic T
---- @param self blink.lib.Task<T>
+--- @param self blink.lib.Future<T>
 --- @param ... T
-function Task:resolve(...)
+function Future:resolve(...)
   local value = ...
   -- resolving with a value, settle
-  if getmetatable(value) ~= Task or select('#', ...) ~= 1 then return self:_settle(RESOLVED, ...) end
+  if getmetatable(value) ~= Future or select('#', ...) ~= 1 then return self:_settle(RESOLVED, ...) end
 
-  -- resolving another task, flatten
+  -- resolving another future, flatten
   if self.state ~= PENDING then return end
-  if value == self then return self:reject('task resolved with itself') end
+  if value == self then return self:reject('future resolved with itself') end
   value:_finally(function(ok, ...)
     if ok then
       self:resolve(...)
@@ -267,14 +267,14 @@ function Task:resolve(...)
   end)
 end
 
---- Reject this task with an error
+--- Reject this future with an error
 --- @generic T
---- @param self blink.lib.Task<T>
+--- @param self blink.lib.Future<T>
 --- @param err any
-function Task:reject(err) self:_settle(REJECTED, err) end
+function Future:reject(err) self:_settle(REJECTED, err) end
 
---- Cancel this task and all its children
-function Task:cancel()
+--- Cancel this future and all its children
+function Future:cancel()
   if self.state ~= PENDING then return end
   self.state = SETTLING
 
@@ -288,14 +288,14 @@ function Task:cancel()
 end
 
 --- @private
-function Task:_settle(state, ...)
+function Future:_settle(state, ...)
   if self.state ~= PENDING then return end
   self.state = SETTLING
 
   -- no children to await, finalize immediately
   if self.children == nil then return self:_finalize(state, ...) end
 
-  -- gather pending children, or cancel them if this task rejected/cancelled
+  -- gather pending children, or cancel them if this future rejected/cancelled
   local pending_children = {}
   for _, child in ipairs(self.children) do
     if child.state <= SETTLING then
@@ -330,7 +330,7 @@ function Task:_settle(state, ...)
 end
 
 --- @private
-function Task:_finalize(state, ...)
+function Future:_finalize(state, ...)
   if self.state ~= SETTLING then return end
   self.state = state
   self.values = pack(...)
@@ -345,7 +345,7 @@ function Task:_finalize(state, ...)
 end
 
 --- @private
-function Task:_finally(cb)
+function Future:_finally(cb)
   if self.state ~= PENDING then
     cb(self.state == RESOLVED, unpack(self.values))
     return

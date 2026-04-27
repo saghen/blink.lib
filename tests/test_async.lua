@@ -10,10 +10,10 @@ local await = async.await
 
 local T = MiniTest.new_set()
 
---- Helper: expect a task to fail with a pattern
-local function expect_err(task, pat, timeout)
-  local ok, err = task:pwait(timeout or 100)
-  if ok then error('Expected task to error, but it completed successfully', 2) end
+--- Helper: expect a future to fail with a pattern
+local function expect_err(future, pat, timeout)
+  local ok, err = future:pwait(timeout or 100)
+  if ok then error('Expected future to error, but it completed successfully', 2) end
   if not tostring(err):match(pat) then error('Unexpected error: ' .. tostring(err), 2) end
   return err
 end
@@ -36,11 +36,11 @@ end
 T['basic'] = MiniTest.new_set()
 
 T['basic']['error on sync wait'] = function()
-  local task = async.run(function() error('SYNC ERR') end)
-  expect_err(task, 'SYNC ERR')
+  local future = async.run(function() error('SYNC ERR') end)
+  expect_err(future, 'SYNC ERR')
 end
 
-T['basic']['can await a task'] = function()
+T['basic']['can await a future'] = function()
   local a = async
     .run(function()
       return await(async.run(function()
@@ -53,7 +53,7 @@ T['basic']['can await a task'] = function()
   eq(a, 'JJ')
 end
 
-T['basic']['can flatten a task'] = function()
+T['basic']['can flatten a future'] = function()
   local a = async
     .run(function()
       return async.run(function()
@@ -66,35 +66,35 @@ T['basic']['can flatten a task'] = function()
   eq(a, 'JJ')
 end
 
-T['basic']['can wait on an empty task'] = function()
+T['basic']['can wait on an empty future'] = function()
   local did_cb = false
   local a = 1
 
-  local task = async.run(function() a = a + 1 end)
+  local future = async.run(function() a = a + 1 end)
 
-  task:wait(function() did_cb = true end)
-  task:wait(100)
+  future:wait(function() did_cb = true end)
+  future:wait(100)
 
   eq(a, 2)
   eq(did_cb, true)
 end
 
-T['basic']['handles tasks that complete with a value'] = function()
-  local task = async.run(function()
+T['basic']['handles futures that complete with a value'] = function()
+  local future = async.run(function()
     sleep(1)
     return 42
   end)
 
-  eq(task:wait(100), 42)
+  eq(future:wait(100), 42)
 end
 
-T['basic']['handles tasks that complete with multiple values'] = function()
-  local task = async.run(function()
+T['basic']['handles futures that complete with multiple values'] = function()
+  local future = async.run(function()
     sleep(1)
     return nil, 1
   end)
 
-  local r1, r2 = task:wait(100)
+  local r1, r2 = future:wait(100)
   vim.print(r1, r2)
   eq(r1, nil)
   eq(r2, 1)
@@ -120,63 +120,63 @@ end
 
 T['cancel'] = MiniTest.new_set()
 
-T['cancel']['can cancel tasks'] = function()
-  local task = async.run(eternity)
-  task:cancel()
-  expect_err(task, 'cancelled')
+T['cancel']['can cancel futures'] = function()
+  local future = async.run(eternity)
+  future:cancel()
+  expect_err(future, 'cancelled')
 end
 
-T['cancel']['can cancel task waiting on a wrapped callback'] = function()
-  local task = async.run(function()
+T['cancel']['can cancel future waiting on a wrapped callback'] = function()
+  local future = async.run(function()
     async.wrap(function(_callback)
       -- never calls the callback
     end)
   end)
 
-  task:cancel()
-  expect_err(task, 'cancelled')
+  future:cancel()
+  expect_err(future, 'cancelled')
 end
 
 T['cancel']['wrap callback cancellation hook is invoked'] = function()
   local hook_called = false
-  local task = async.run(function()
+  local future = async.run(function()
     async.wrap(function(_callback)
       return function() hook_called = true end
     end)
   end)
 
-  task:cancel()
-  expect_err(task, 'cancelled')
+  future:cancel()
+  expect_err(future, 'cancelled')
   eq(hook_called, true)
 end
 
-T['cancel']['can cancel nested task awaiting child'] = function()
+T['cancel']['can cancel nested future awaiting child'] = function()
   local child
-  local task = async.run(function()
+  local future = async.run(function()
     child = async.run(eternity)
     await(child)
   end)
 
-  task:cancel()
+  future:cancel()
 
-  expect_err(task, 'cancelled')
+  expect_err(future, 'cancelled')
   expect_err(child, 'cancelled')
 end
 
-T['cancel']['can timeout tasks'] = function()
-  local task = async.run(eternity)
-  expect_err(task, 'timeout', 10)
-  task:cancel()
-  expect_err(task, 'cancelled')
+T['cancel']['can timeout futures'] = function()
+  local future = async.run(eternity)
+  expect_err(future, 'timeout', 10)
+  future:cancel()
+  expect_err(future, 'cancelled')
 end
 
-T['cancel']['cancels awaited detached task'] = function()
-  local task1 = async.run(eternity)
-  task1:cancel()
+T['cancel']['cancels awaited detached future'] = function()
+  local future1 = async.run(eternity)
+  future1:cancel()
 
-  local task2 = async.run(function() await(task1) end)
+  local future2 = async.run(function() await(future1) end)
 
-  expect_err(task2, 'cancelled')
+  expect_err(future2, 'cancelled')
 end
 
 T['cancel']['cancelling child does not cancel parent'] = function()
@@ -189,30 +189,30 @@ end
 
 T['errors'] = MiniTest.new_set()
 
-T['errors']['handles tasks that error after an await'] = function()
-  local task = async.run(function()
+T['errors']['handles futures that error after an await'] = function()
+  local future = async.run(function()
     sleep(1)
     error('GOT HERE')
   end)
 
-  expect_err(task, 'GOT HERE')
+  expect_err(future, 'GOT HERE')
 end
 
 T['errors']['handles errors in wrapped callback functions'] = function()
-  local task = async.run(function()
+  local future = async.run(function()
     async.wrap(function(_callback) error('ERROR') end)
   end)
-  expect_err(task, 'ERROR')
+  expect_err(future, 'ERROR')
 end
 
 T['errors']['can pcall errors from wrapped functions'] = function()
-  local task = async.run(function()
+  local future = async.run(function()
     return pcall(function()
       async.wrap(function(_callback) error('ERROR') end)
     end)
   end)
 
-  local ok, msg = task:wait(100)
+  local ok, msg = future:wait(100)
   eq(ok, false)
   assert(msg:match('ERROR'), 'Expected ERROR, got: ' .. tostring(msg))
 end
@@ -253,12 +253,12 @@ T['errors']['child error during parent finalization is handled'] = function()
 end
 
 -- ==============================================================
--- Child task management
+-- Child future management
 -- ==============================================================
 
 T['children'] = MiniTest.new_set()
 
-T['children']['waits for child tasks when parent settles'] = function()
+T['children']['waits for child futures when parent settles'] = function()
   -- This is explicitly noted as a difference from async.nvim:
   -- unawaited children are cancelled when parent settles.
   local child
@@ -300,7 +300,7 @@ T['children']['cancelling parent cancels suspended child'] = function()
   expect_err(child, 'cancelled')
 end
 
-T['children']['automatically awaits child tasks'] = function()
+T['children']['automatically awaits child futures'] = function()
   local child1, child2
   local main = async.run(function()
     child1 = async.run(function() sleep(10) end)
@@ -331,7 +331,7 @@ end
 
 T['resolve'] = MiniTest.new_set()
 
-T['resolve']['resolving with a task flattens the result'] = function()
+T['resolve']['resolving with a future flattens the result'] = function()
   local inner = async.run(function()
     sleep(1)
     return 'inner value'
@@ -350,17 +350,17 @@ T['wait'] = MiniTest.new_set()
 
 T['wait']['non-blocking callback form receives ok/value'] = function()
   local got_err, got_val
-  local task = async.run(function()
+  local future = async.run(function()
     sleep(1)
     return 'hello'
   end)
 
-  task:wait(function(err, val)
+  future:wait(function(err, val)
     got_err = err
     got_val = val
   end)
 
-  task:wait(100)
+  future:wait(100)
 
   eq(got_err, nil)
   eq(got_val, 'hello')
@@ -368,17 +368,17 @@ end
 
 T['wait']['non-blocking callback form receives error'] = function()
   local got_err, got_val
-  local task = async.run(function()
+  local future = async.run(function()
     sleep(1)
     error('boom')
   end)
 
-  task:wait(function(err, val)
+  future:wait(function(err, val)
     got_err = err
     got_val = val
   end)
 
-  task:pwait(100)
+  future:pwait(100)
 
   eq(got_val, nil)
   assert(tostring(got_err):match('boom'), 'Expected "boom", got: ' .. tostring(got_val))
@@ -390,7 +390,7 @@ end
 
 T['all'] = MiniTest.new_set()
 
-T['all']['returns results of all tasks'] = function()
+T['all']['returns results of all futures'] = function()
   local result = async
     .run(function()
       return async.all({
@@ -413,8 +413,8 @@ T['all']['returns results of all tasks'] = function()
   eq(result, { 1, 2, 3 })
 end
 
-T['all']['errors if any task rejects'] = function()
-  local task = async.run(function()
+T['all']['errors if any future rejects'] = function()
+  local future = async.run(function()
     return async.all({
       async.run(function()
         sleep(1)
@@ -431,12 +431,12 @@ T['all']['errors if any task rejects'] = function()
     })
   end)
 
-  expect_err(task, 'BOOM')
+  expect_err(future, 'BOOM')
 end
 
 T['any'] = MiniTest.new_set()
 
-T['any']['returns the first task to resolve'] = function()
+T['any']['returns the first future to resolve'] = function()
   local result = async
     .run(function()
       return async.any({
@@ -455,8 +455,8 @@ T['any']['returns the first task to resolve'] = function()
   eq(result, 'fast')
 end
 
-T['any']['errors if all tasks reject'] = function()
-  local task = async.run(function()
+T['any']['errors if all futures reject'] = function()
+  local future = async.run(function()
     return async.any({
       async.run(function()
         sleep(1)
@@ -469,7 +469,7 @@ T['any']['errors if all tasks reject'] = function()
     })
   end)
 
-  expect_err(task, 'all tasks rejected')
+  expect_err(future, 'all futures rejected')
 end
 
 -- ==============================================================
@@ -482,7 +482,7 @@ T['edge']['callback called multiple times is handled gracefully'] = function()
   local call_count = 0
   local results = {}
 
-  local task = async.run(function()
+  local future = async.run(function()
     local result = async.wrap(function(callback)
       call_count = call_count + 1
       callback(nil, 'FIRST_CALL')
@@ -498,7 +498,7 @@ T['edge']['callback called multiple times is handled gracefully'] = function()
     return result
   end)
 
-  local final_result = task:wait(100)
+  local final_result = future:wait(100)
 
   eq(final_result, 'FIRST_CALL')
   eq(#results, 1)
@@ -515,20 +515,20 @@ T['edge']['callback called multiple times is handled gracefully'] = function()
 end
 
 T['edge']['status reflects lifecycle'] = function()
-  local task = async.run(eternity)
-  eq(task:status(), 'pending')
-  task:cancel()
-  eq(task:status(), 'cancelled')
+  local future = async.run(eternity)
+  eq(future:status(), 'pending')
+  future:cancel()
+  eq(future:status(), 'cancelled')
 end
 
-T['edge']['resolving task with itself rejects'] = function()
-  local task
-  task = async.run(function()
+T['edge']['resolving future with itself rejects'] = function()
+  local future
+  future = async.run(function()
     sleep(1)
-    return task
+    return future
   end)
 
-  expect_err(task, 'task resolved with itself')
+  expect_err(future, 'future resolved with itself')
 end
 
 return T
