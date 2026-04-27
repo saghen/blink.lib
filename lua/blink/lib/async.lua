@@ -1,11 +1,16 @@
 --- Structured concurrency where errors propagate up and cancellation propagates down.
 --- Inspired by https://github.com/lewis6991/async.nvim
 ---
---- Differences from async.nvim:
---- - .wrap() uses a closure and supports returning a cancellation func
---- - uv hooks are not automatically closed
---- - ~2-4x faster and significantly simpler (208 LoC ignoring blanks/comments)
---- - other?
+--- The primary difference comes from the scheduler, where blink.lib.async uses a synchronous step() closure which owns the coroutine. Every step() inspects the yield()-ed value, and arranges for step() to be called again, or it settles. The code doesn't include the defensive guards that async.nvim has around unexpected coroutine.resumes. It also doesn't (currently) include a trampoline to avoid stack overflows. The event loop comes entirely from the .wrap()-ed Futures, not from the scheduler. An entirely synchronous async.run() call will be run synchronously.
+---
+--- Other differences from async.nvim:
+---
+--- - not runtime agnostic
+--- - `async.await()` only applies to `Future`s, `async.wrap()` still applies to any `cb` func
+--- - `async.wrap()` always uses a closure and supports returning a cancellation func, rather than calling `:close()`
+--- - ~-60% lower runtime and ~-50% lower mem usage, see PR for scripts (benchmarks need more verification, ideally some real I/O heavy workloads)
+--- - tracebacks untested (planning to look into it)
+--- - simpler (208 LoC ignoring blanks/comments)
 ---
 --- Remaining work:
 --- - semaphores
@@ -72,13 +77,13 @@ function async.run(fn)
     end
   end
 
-  local function step(ok, ...)
+  local function step(...)
     -- cancelled while suspended
     if future.state ~= PENDING then return end
 
     local prev = current_future
     current_future = future
-    local yielded = pack(coroutine.resume(co, ok, ...))
+    local yielded = pack(coroutine.resume(co, ...))
     current_future = prev
 
     -- synchronously failed
@@ -287,6 +292,9 @@ function Future:cancel()
   self:_finalize(CANCELLED, 'cancelled')
 end
 
+--- Pending -> Settling
+--- Cancel all children on rejection/cancellation
+--- Wait for all children on resolve
 --- @private
 function Future:_settle(state, ...)
   if self.state ~= PENDING then return end
@@ -329,6 +337,8 @@ function Future:_settle(state, ...)
   end
 end
 
+--- Settling -> Resolved/Rejected/Cancelled
+--- Runs all callbacks
 --- @private
 function Future:_finalize(state, ...)
   if self.state ~= SETTLING then return end

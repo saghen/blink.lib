@@ -95,7 +95,6 @@ T['basic']['handles futures that complete with multiple values'] = function()
   end)
 
   local r1, r2 = future:wait(100)
-  vim.print(r1, r2)
   eq(r1, nil)
   eq(r2, 1)
 end
