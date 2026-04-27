@@ -144,6 +144,16 @@ function async.wrap(fn)
   return unpack(yielded, 2)
 end
 
+--- Wait for this future to settle (blocking). Must be called from within a `async.run` closure.
+--- @generic T
+--- @param future blink.lib.Future<T>
+--- @return T...
+function async.await(future)
+  local yielded = pack(coroutine.yield(future))
+  if not yielded[1] then error(yielded[2], 0) end
+  return unpack(yielded, 2)
+end
+
 --- Return the results of all futures, or error if any future rejects.
 --- All children will be implicitly cancelled on failure.
 --- @generic T
@@ -187,16 +197,6 @@ function async.any(futures)
       end
     end
   end)
-end
-
---- Wait for this future to settle (blocking). Must be called from within a `async.run` closure.
---- @generic T
---- @param future blink.lib.Future<T>
---- @return T...
-function async.await(future)
-  local yielded = pack(coroutine.yield(future))
-  if not yielded[1] then error(yielded[2], 0) end
-  return unpack(yielded, 2)
 end
 
 ------------------
