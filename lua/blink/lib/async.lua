@@ -3,6 +3,7 @@
 ---
 --- Differences from async.nvim:
 --- - .wrap() uses a closure and supports returning a cancellation func
+--- - uv hooks are not automatically closed
 --- - ~3-4x faster and significantly simpler (214 LoC ignoring blanks/comments)
 --- - other?
 ---
@@ -13,7 +14,9 @@
 --- - expand test suite (`pwait`, `async.all`, `async.any`, ...)
 --- - expand helpers (`async.schedule`, `async.iter`, ...)
 
-local function pack(...) return { ... } end
+local function pack(...) return { n = select('#', ...), ... } end
+local _unpack = unpack
+local function unpack(t, i, j) return _unpack(t, i or 1, j or t.n) end
 
 local PENDING = 1
 local SETTLING = 2
@@ -78,12 +81,14 @@ function async.run(fn)
     local yielded = pack(coroutine.resume(co, ok, ...))
     current_task = prev
 
+    -- synchronously failed
     if not yielded[1] then
       task:reject(unpack(yielded, 2))
     elseif #yielded == 2 and getmetatable(yielded[2]) == Task then
-      -- this coroutine completed, but returned a task, flatten
+      -- synchronously returned a task, flatten
       -- async.run(function() return async.run(function() sleep(1) end) end)
       if coroutine.status(co) == 'dead' then
+        if yielded[2] == task then return task:reject('task resolved with itself') end
         yielded[2]:_finally(function(ok, ...)
           if ok then
             task:resolve(...)
@@ -232,7 +237,7 @@ end
 --- @overload fun(timeout?: integer): boolean, T...
 function Task:pwait(timeout_or_cb)
   if type(timeout_or_cb) == 'function' then return self:_finally(timeout_or_cb) end
-  return pcall(self.wait, self, timeout)
+  return pcall(self.wait, self, timeout_or_cb)
 end
 
 --- @return 'pending' | 'settling' | 'resolved' | 'rejected' | 'cancelled'
@@ -279,8 +284,15 @@ function Task:reject(err) self:_settle(REJECTED, err) end
 --- Cancel this task and all its children
 function Task:cancel()
   if self.state ~= PENDING then return end
+  self.state = SETTLING
+
   if self.cleanup ~= nil then self.cleanup() end
-  self:_settle(CANCELLED, 'cancelled')
+  if self.children ~= nil then
+    for _, child in ipairs(self.children) do
+      child:cancel()
+    end
+  end
+  self:_finalize(CANCELLED, 'cancelled')
 end
 
 --- @private
@@ -288,25 +300,31 @@ function Task:_settle(state, ...)
   if self.state ~= PENDING then return end
   self.state = SETTLING
 
-  local args = pack(...)
+  -- no children to await, finalize immediately
+  if self.children == nil then return self:_finalize(state, ...) end
 
+  -- gather pending children, or cancel them if this task rejected/cancelled
   local pending_children = {}
   if self.children ~= nil then
     for _, child in ipairs(self.children) do
-      if child.state == PENDING then
-        -- on error/cancel, cancel children but still await their cleanup
-        if state ~= RESOLVED then child:cancel() end
-        table.insert(pending_children, child)
+      if child.state <= SETTLING then
+        -- on error/cancel, cancel children
+        if state ~= RESOLVED then
+          child:cancel()
+        -- otherwise, wait for child to settle
+        else
+          table.insert(pending_children, child)
+        end
       end
     end
     self.children = nil
   end
 
-  if #pending_children == 0 then
-    self:_finalize(state, unpack(args))
-    return
-  end
+  -- no children left, finalize immediately
+  if #pending_children == 0 then return self:_finalize(state, ...) end
 
+  -- wait for children to settle
+  local args = pack(...)
   local remaining = #pending_children
   for _, child in ipairs(pending_children) do
     child:_finally(function(ok, ...)
@@ -318,14 +336,6 @@ function Task:_settle(state, ...)
       remaining = remaining - 1
       if remaining == 0 then self:_finalize(state, unpack(args)) end
     end)
-  end
-
-  -- fire callbacks
-  if self.cbs ~= nil then
-    for _, cb in ipairs(self.cbs) do
-      cb(state == RESOLVED, ...)
-    end
-    self.cbs = nil
   end
 end
 

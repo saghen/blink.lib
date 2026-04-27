@@ -89,6 +89,32 @@ T['basic']['handles tasks that complete with a value'] = function()
   eq(task:wait(100), 42)
 end
 
+T['basic']['handles tasks that complete with multiple values'] = function()
+  local task = async.run(function()
+    sleep(1)
+    return nil, 1
+  end)
+
+  local r1, r2 = task:wait(100)
+  vim.print(r1, r2)
+  eq(r1, nil)
+  eq(r2, 1)
+end
+
+-- TODO:
+-- T['basic']['does not need new stack frame for non-deferred continuations'] = function()
+--   --- @async
+--   local function deep(n)
+--     if n == 0 then return 'done' end
+--     async.wrap(function(cb) cb() end)
+--     return deep(n - 1)
+--   end
+--
+--   local res = async.run(function() return deep(10000) end):wait(1000)
+--   vim.print(res, 'res')
+--   eq(res, 'done')
+-- end
+
 -- ==============================================================
 -- async cancellation
 -- ==============================================================
@@ -125,6 +151,39 @@ T['cancel']['wrap callback cancellation hook is invoked'] = function()
   eq(hook_called, true)
 end
 
+T['cancel']['can cancel nested task awaiting child'] = function()
+  local child
+  local task = async.run(function()
+    child = async.run(eternity)
+    child:await()
+  end)
+
+  task:cancel()
+
+  expect_err(task, 'cancelled')
+  expect_err(child, 'cancelled')
+end
+
+T['cancel']['can timeout tasks'] = function()
+  local task = async.run(eternity)
+  expect_err(task, 'timeout', 10)
+  task:cancel()
+  expect_err(task, 'cancelled')
+end
+
+T['cancel']['cancels awaited detached task'] = function()
+  local task1 = async.run(eternity)
+  task1:cancel()
+
+  local task2 = async.run(function() task1:await() end)
+
+  expect_err(task2, 'cancelled')
+end
+
+T['cancel']['cancelling child does not cancel parent'] = function()
+  async.run(function() async.run(eternity):cancel() end):wait(100)
+end
+
 -- ==============================================================
 -- Error handling
 -- ==============================================================
@@ -155,9 +214,43 @@ T['errors']['can pcall errors from wrapped functions'] = function()
   end)
 
   local ok, msg = task:wait(100)
-  vim.print(ok, msg)
   eq(ok, false)
   assert(msg:match('ERROR'), 'Expected ERROR, got: ' .. tostring(msg))
+end
+
+T['errors']['handles when a floating child errors'] = function()
+  local parent = async.run(function()
+    local _child = async.run(function()
+      sleep(5)
+      error('CHILD ERROR')
+    end)
+  end)
+
+  expect_err(parent, 'CHILD ERROR')
+end
+
+T['errors']['parent error takes precedence over child error'] = function()
+  local parent = async.run(function()
+    local _child = async.run(function()
+      sleep(5)
+      error('CHILD ERROR')
+    end)
+    error('PARENT ERROR')
+  end)
+
+  expect_err(parent, 'PARENT ERROR')
+end
+
+T['errors']['child error during parent finalization is handled'] = function()
+  local parent = async.run(function()
+    local _child = async.run(function()
+      sleep(5)
+      error('CHILD_ERROR')
+    end)
+    -- Parent completes immediately, starting finalization
+  end)
+
+  expect_err(parent, 'CHILD_ERROR')
 end
 
 -- ==============================================================
@@ -206,6 +299,31 @@ T['children']['cancelling parent cancels suspended child'] = function()
   parent:cancel()
   expect_err(parent, 'cancelled')
   expect_err(child, 'cancelled')
+end
+
+T['children']['automatically awaits child tasks'] = function()
+  local child1, child2
+  local main = async.run(function()
+    child1 = async.run(function() sleep(10) end)
+    child2 = async.run(function() sleep(10) end)
+  end)
+
+  main:wait(100)
+  eq(child1:status(), 'resolved')
+  eq(child2:status(), 'resolved')
+end
+
+T['children']['children finishing before parent does not fail parent'] = function()
+  local child1, child2
+  local main = async.run(function()
+    child1 = async.run(function() sleep(5) end)
+    child2 = async.run(function() sleep(5) end)
+    sleep(20)
+  end)
+
+  main:wait(100)
+  eq(child1:status(), 'resolved')
+  eq(child2:status(), 'resolved')
 end
 
 -- ==============================================================
@@ -265,6 +383,153 @@ T['wait']['non-blocking callback form receives error'] = function()
 
   eq(got_val, nil)
   assert(tostring(got_err):match('boom'), 'Expected "boom", got: ' .. tostring(got_val))
+end
+
+-- ==============================================================
+-- async.all / async.any
+-- ==============================================================
+
+T['all'] = MiniTest.new_set()
+
+T['all']['returns results of all tasks'] = function()
+  local result = async
+    .run(function()
+      return async.all({
+        async.run(function()
+          sleep(1)
+          return 1
+        end),
+        async.run(function()
+          sleep(2)
+          return 2
+        end),
+        async.run(function()
+          sleep(3)
+          return 3
+        end),
+      })
+    end)
+    :wait(100)
+
+  eq(result, { 1, 2, 3 })
+end
+
+T['all']['errors if any task rejects'] = function()
+  local task = async.run(function()
+    return async.all({
+      async.run(function()
+        sleep(1)
+        return 1
+      end),
+      async.run(function()
+        sleep(2)
+        error('BOOM')
+      end),
+      async.run(function()
+        sleep(3)
+        return 3
+      end),
+    })
+  end)
+
+  expect_err(task, 'BOOM')
+end
+
+T['any'] = MiniTest.new_set()
+
+T['any']['returns the first task to resolve'] = function()
+  local result = async
+    .run(function()
+      return async.any({
+        async.run(function()
+          sleep(50)
+          return 'slow'
+        end),
+        async.run(function()
+          sleep(1)
+          return 'fast'
+        end),
+      })
+    end)
+    :wait(100)
+
+  eq(result, 'fast')
+end
+
+T['any']['errors if all tasks reject'] = function()
+  local task = async.run(function()
+    return async.any({
+      async.run(function()
+        sleep(1)
+        error('a')
+      end),
+      async.run(function()
+        sleep(2)
+        error('b')
+      end),
+    })
+  end)
+
+  expect_err(task, 'all tasks rejected')
+end
+
+-- ==============================================================
+-- Edge cases
+-- ==============================================================
+
+T['edge'] = MiniTest.new_set()
+
+T['edge']['callback called multiple times is handled gracefully'] = function()
+  local call_count = 0
+  local results = {}
+
+  local task = async.run(function()
+    local result = async.wrap(function(callback)
+      call_count = call_count + 1
+      callback(nil, 'FIRST_CALL')
+
+      -- Try calling again (should be ignored)
+      vim.schedule(function()
+        call_count = call_count + 1
+        callback(nil, 'SECOND_CALL')
+      end)
+    end)
+
+    table.insert(results, result)
+    return result
+  end)
+
+  local final_result = task:wait(100)
+
+  eq(final_result, 'FIRST_CALL')
+  eq(#results, 1)
+  eq(results[1], 'FIRST_CALL')
+
+  -- Wait for the second callback to potentially fire
+  async.run(function() sleep(20) end):wait(100)
+
+  -- Both callbacks should have been called
+  eq(call_count, 2)
+
+  -- But only the first should have been processed
+  eq(#results, 1)
+end
+
+T['edge']['status reflects lifecycle'] = function()
+  local task = async.run(eternity)
+  eq(task:status(), 'pending')
+  task:cancel()
+  eq(task:status(), 'cancelled')
+end
+
+T['edge']['resolving task with itself rejects'] = function()
+  local task
+  task = async.run(function()
+    sleep(1)
+    return task
+  end)
+
+  expect_err(task, 'task resolved with itself')
 end
 
 return T
