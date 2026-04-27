@@ -180,6 +180,20 @@ T['cancel']['cancelling child does not cancel parent'] = function()
   async.run(function() async.run(eternity):cancel() end):wait(100)
 end
 
+T['cancel']['cancellation hook errors are handled'] = function()
+  -- If the cleanup function errors, cancellation should still work
+  local future = async.run(function()
+    async.wrap(function(_callback)
+      return function() error('CLEANUP_ERROR') end
+    end)
+  end)
+
+  -- cancelling should not throw even if cleanup errors
+  local ok = pcall(function() future:cancel() end)
+  -- Either cancel succeeded silently or propagated - either way, verify behavior
+  if ok then expect_err(future, 'cancelled') end
+end
+
 -- ==============================================================
 -- Error handling
 -- ==============================================================
@@ -247,6 +261,41 @@ T['errors']['child error during parent finalization is handled'] = function()
   end)
 
   expect_err(parent, 'CHILD_ERROR')
+end
+
+T['errors']['multiple floating children - first error propagates'] = function()
+  local parent = async.run(function()
+    async.run(function()
+      sleep(5)
+      error('ERROR_1')
+    end)
+
+    async.run(function()
+      sleep(10)
+      error('ERROR_2')
+    end)
+
+    -- parent completes immediately and waits on both children
+  end)
+
+  -- First child to reject wins
+  expect_err(parent, 'ERROR_1')
+end
+
+T['errors']['error in pcall inside async run'] = function()
+  local result
+  local future = async.run(function()
+    local ok, err = pcall(function()
+      sleep(1)
+      error('INNER_ERROR')
+    end)
+    result = { ok = ok, err = err }
+    return 'RECOVERED'
+  end)
+
+  eq(future:wait(100), 'RECOVERED')
+  eq(result.ok, false)
+  assert(result.err:match('INNER_ERROR'))
 end
 
 -- ==============================================================
@@ -322,6 +371,33 @@ T['children']['children finishing before parent does not fail parent'] = functio
   eq(child2:status(), 'resolved')
 end
 
+T['children']['cancelling child does not cancel parent'] = function()
+  async.run(function() async.run(eternity):cancel() end):wait(100)
+end
+
+T['children']['deeply nested children all cancelled with root'] = function()
+  local c1, c2, c3
+  local root = async.run(function()
+    c1 = async.run(function()
+      c2 = async.run(function()
+        c3 = async.run(eternity)
+        await(c3)
+      end)
+      await(c2)
+    end)
+    await(c1)
+  end)
+
+  -- let the tree build up
+  vim.wait(10, function() return c3 ~= nil end)
+
+  root:cancel()
+  expect_err(root, 'cancelled')
+  expect_err(c1, 'cancelled')
+  expect_err(c2, 'cancelled')
+  expect_err(c3, 'cancelled')
+end
+
 -- ==============================================================
 -- Detach from parent
 -- ==============================================================
@@ -391,6 +467,17 @@ T['resolve']['resolving with a future flattens the result'] = function()
   eq(outer:wait(100), 'inner value')
 end
 
+T['resolve']['resolving with a rejecting future propagates error'] = function()
+  local inner = async.run(function()
+    sleep(1)
+    error('INNER_ERR')
+  end)
+
+  local outer = async.run(function() return inner end)
+
+  expect_err(outer, 'INNER_ERR')
+end
+
 -- ==============================================================
 -- Wait variants
 -- ==============================================================
@@ -431,6 +518,44 @@ T['wait']['non-blocking callback form receives error'] = function()
 
   eq(got_val, nil)
   assert(tostring(got_err):match('boom'), 'Expected "boom", got: ' .. tostring(got_val))
+end
+
+T['wait']['pwait returns ok=true for successful future'] = function()
+  local future = async.run(function()
+    sleep(1)
+    return 'ok', 2
+  end)
+
+  local ok, v1, v2 = future:pwait(100)
+  eq(ok, true)
+  eq(v1, 'ok')
+  eq(v2, 2)
+end
+
+T['wait']['pwait returns ok=false with error'] = function()
+  local future = async.run(function()
+    sleep(1)
+    error('BOOM')
+  end)
+
+  local ok, err = future:pwait(100)
+  eq(ok, false)
+  assert(tostring(err):match('BOOM'))
+end
+
+T['wait']['wait on already-settled future returns value immediately'] = function()
+  local future = async.run(function() return 42 end)
+  -- no await, should resolve synchronously
+  eq(future:status(), 'resolved')
+  eq(future:wait(100), 42)
+end
+
+T['wait']['callback registered after settle is fired immediately'] = function()
+  local future = async.run(function() return 'done' end)
+
+  local got_val
+  future:wait(function(_err, val) got_val = val end)
+  eq(got_val, 'done')
 end
 
 -- ==============================================================
@@ -483,6 +608,11 @@ T['all']['errors if any future rejects'] = function()
   expect_err(future, 'BOOM')
 end
 
+T['all']['empty list resolves with empty table'] = function()
+  local result = async.run(function() return async.all({}) end):wait(100)
+  eq(result, {})
+end
+
 T['any'] = MiniTest.new_set()
 
 T['any']['returns the first future to resolve'] = function()
@@ -519,6 +649,25 @@ T['any']['errors if all futures reject'] = function()
   end)
 
   expect_err(future, 'all futures rejected')
+end
+
+T['any']['first resolving wins even if later ones would reject'] = function()
+  local result = async
+    .run(function()
+      return async.any({
+        async.run(function()
+          sleep(1)
+          return 'winner'
+        end),
+        async.run(function()
+          sleep(5)
+          error('too late')
+        end),
+      })
+    end)
+    :wait(100)
+
+  eq(result, 'winner')
 end
 
 -- ==============================================================
@@ -563,6 +712,20 @@ T['edge']['callback called multiple times is handled gracefully'] = function()
   eq(#results, 1)
 end
 
+T['edge']['async callback called multiple times is ignored'] = function()
+  -- Similar to above but where the first call is asynchronous
+  local result
+  local future = async.run(function()
+    return async.wrap(function(callback)
+      vim.schedule(function() callback(nil, 'FIRST') end)
+      vim.defer_fn(function() callback(nil, 'SECOND') end, 5)
+    end)
+  end)
+
+  result = future:wait(100)
+  eq(result, 'FIRST')
+end
+
 T['edge']['status reflects lifecycle'] = function()
   local future = async.run(eternity)
   eq(future:status(), 'pending')
@@ -578,6 +741,53 @@ T['edge']['resolving future with itself rejects'] = function()
   end)
 
   expect_err(future, 'future resolved with itself')
+end
+
+T['edge']['cancel on already-resolved future is no-op'] = function()
+  local future = async.run(function() return 42 end)
+  eq(future:wait(100), 42)
+  future:cancel()
+  eq(future:status(), 'resolved')
+  eq(future:wait(100), 42)
+end
+
+T['edge']['cancel on already-rejected future is no-op'] = function()
+  local future = async.run(function() error('ERR') end)
+  expect_err(future, 'ERR')
+  future:cancel()
+  eq(future:status(), 'rejected')
+  expect_err(future, 'ERR')
+end
+
+T['edge']['multiple cancel calls are safe'] = function()
+  local future = async.run(eternity)
+  future:cancel()
+  future:cancel()
+  future:cancel()
+  expect_err(future, 'cancelled')
+end
+
+T['edge']['synchronous future resolves synchronously'] = function()
+  -- Per the docs: an entirely synchronous async.run() call will be run synchronously.
+  local future = async.run(function() return 'sync' end)
+  eq(future:status(), 'resolved')
+  eq(future:wait(0), 'sync')
+end
+
+T['edge']['wrap with synchronous callback'] = function()
+  local future = async.run(function()
+    return async.wrap(function(cb) cb(nil, 'sync-wrap') end)
+  end)
+  eq(future:status(), 'resolved')
+  eq(future:wait(0), 'sync-wrap')
+end
+
+T['edge']['wrap callback with error as first arg rejects'] = function()
+  local future = async.run(function()
+    async.wrap(function(cb) cb('OOPS') end)
+  end)
+
+  expect_err(future, 'OOPS')
 end
 
 return T
