@@ -325,6 +325,58 @@ T['children']['children finishing before parent does not fail parent'] = functio
 end
 
 -- ==============================================================
+-- Detach from parent
+-- ==============================================================
+
+T['detach'] = MiniTest.new_set()
+
+T['detach']['parent does not wait for detached child'] = function()
+  local child
+  local parent = async.run(function()
+    child = async.run(function() sleep(50) end)
+    child:detach()
+  end)
+
+  parent:wait(100)
+  eq(parent:status(), 'resolved')
+  eq(child:status(), 'pending')
+
+  child:wait(100)
+  eq(child:status(), 'resolved')
+end
+
+T['detach']['cancelling parent does not cancel detached child'] = function()
+  local child
+  local parent = async.run(function()
+    child = async.run(function() sleep(20) end)
+    child:detach()
+    sleep(100)
+  end)
+
+  parent:cancel()
+  expect_err(parent, 'cancelled')
+
+  child:wait(100)
+  eq(child:status(), 'resolved')
+end
+
+T['detach']['detached child error does not reject parent'] = function()
+  local child
+  local parent = async.run(function()
+    child = async.run(function()
+      sleep(1)
+      error('DETACHED_ERROR')
+    end)
+    child:detach()
+  end)
+
+  parent:wait(100)
+  eq(parent:status(), 'resolved')
+
+  expect_err(child, 'DETACHED_ERROR')
+end
+
+-- ==============================================================
 -- Resolution flattening
 -- ==============================================================
 

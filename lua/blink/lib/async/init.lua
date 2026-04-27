@@ -75,6 +75,7 @@ function async.run(fn)
     else
       table.insert(current_future.children, future)
     end
+    future.parent_child_idx = #current_future.children
   end
 
   local function step(...)
@@ -150,6 +151,8 @@ end
 --- @return T...
 function async.await(future)
   local yielded = pack(coroutine.yield(future))
+  -- child has been awaited by the parent, detach it so we ignore it on completion
+  if current_future == future.parent then future:detach() end
   if not yielded[1] then error(yielded[2], 0) end
   return unpack(yielded, 2)
 end
@@ -202,6 +205,18 @@ end
 ------------------
 --- Future
 ------------------
+
+function Future:detach()
+  if self.parent == nil then return end
+  if #self.parent.children == 1 then
+    -- fast path: only child, clear
+    self.parent.children = nil
+  else
+    -- replace child with a placeholder
+    self.parent.children[self.parent_child_idx] = true
+  end
+  self.parent = nil
+end
 
 --- Wait for this future to settle, optionally with a timeout (blocking) or callback (non-blocking)
 --- @generic T
@@ -286,7 +301,7 @@ function Future:cancel()
   if self.cleanup ~= nil then self.cleanup() end
   if self.children ~= nil then
     for _, child in ipairs(self.children) do
-      child:cancel()
+      if child ~= true then child:cancel() end
     end
   end
   self:_finalize(CANCELLED, 'cancelled')
@@ -303,31 +318,31 @@ function Future:_settle(state, ...)
   -- no children to await, finalize immediately
   if self.children == nil then return self:_finalize(state, ...) end
 
-  -- gather pending children, or cancel them if this future rejected/cancelled
-  local pending_children = {}
-  for _, child in ipairs(self.children) do
-    if child.state <= SETTLING then
-      -- on error/cancel, cancel children
-      if state ~= RESOLVED then
-        child:cancel()
-        -- otherwise, wait for child to settle
-      else
-        table.insert(pending_children, child)
-      end
+  -- if we're not resolving successfully, cancel all children and finalize
+  if state ~= RESOLVED then
+    for _, child in ipairs(self.children) do
+      if child ~= true then child:cancel() end
     end
+    return self:_finalize(state, ...)
+  end
+
+  -- filter out detached children
+  local filtered_children = {}
+  for _, child in ipairs(self.children) do
+    if child ~= true then table.insert(filtered_children, child) end
   end
   self.children = nil
 
-  -- no children left, finalize immediately
-  if #pending_children == 0 then return self:_finalize(state, ...) end
+  -- no children, finalize immediately
+  if #filtered_children == 0 then return self:_finalize(state, ...) end
 
   -- wait for children to settle
   local args = pack(...)
-  local remaining = #pending_children
-  for _, child in ipairs(pending_children) do
+  local remaining = #filtered_children
+  for _, child in ipairs(filtered_children) do
     child:_finally(function(ok, ...)
       -- if a child rejects and parent was resolving, convert to reject
-      if not ok and state == RESOLVED and child.state == REJECTED then
+      if not ok and child.state == REJECTED then
         state = REJECTED
         args = pack(...)
       end
