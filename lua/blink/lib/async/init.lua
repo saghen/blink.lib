@@ -42,7 +42,7 @@ local async = {}
 
 --- Run a function in an async context, asynchronously.
 ---
---- Returns an [blink.lib.Future] object which can be used to wait or await the result
+--- Returns a [blink.lib.Future] which can be used to wait or await the result
 --- of the function.
 ---
 --- ```lua
@@ -87,25 +87,21 @@ function async.run(fn)
     local yielded = pack(coroutine.resume(co, ...))
     current_future = prev
 
-    -- synchronously failed
-    if not yielded[1] then
-      future:reject(unpack(yielded, 2))
-    elseif #yielded == 2 and getmetatable(yielded[2]) == Future then
-      -- synchronously returned a future, flatten
-      -- async.run(function() return async.run(function() sleep(1) end) end)
-      if coroutine.status(co) == 'dead' then
-        future:resolve(yielded[2])
-      -- async.await(future): inside of current future
-      else
-        yielded[2]:_finally(step)
-      end
+    -- errored, bubble up
+    if not yielded[1] then return future:reject(yielded[2]) end
 
-    -- coroutine completed, resolve
-    elseif coroutine.status(co) == 'dead' then
-      future:resolve(unpack(yielded, 2))
+    if #yielded == 2 and getmetatable(yielded[2]) == Future then
+      -- async.run(fn): returned a future, flatten
+      if coroutine.status(co) == 'dead' then return future:resolve(yielded[2]) end
+      -- async.await(future): inside of current future
+      return yielded[2]:_finally(step)
+    end
+
+    -- async.run(fn): closure completed, return result
+    if coroutine.status(co) == 'dead' then return future:resolve(unpack(yielded, 2)) end
 
     -- async.wrap(fn): pass callback that resumes the coroutine
-    elseif #yielded == 2 and type(yielded[2]) == 'function' then
+    if type(yielded[2]) == 'function' then
       local settled = false
       local callback = function(err, ...)
         if settled then return end
@@ -118,17 +114,18 @@ function async.run(fn)
         end
       end
 
-      local ok2, on_cancel_or_err = pcall(yielded[2], callback)
+      local ok, on_cancel_or_err = pcall(yielded[2], callback)
       -- synchronous error
-      if not ok2 and not settled then
+      if not ok and not settled then
         callback(on_cancel_or_err)
       -- cancellation hook
       elseif type(on_cancel_or_err) == 'function' then
         future.cleanup = on_cancel_or_err
       end
-    else
-      future:reject('yielded unexpected value')
+      return
     end
+
+    future:reject('yielded unexpected value')
   end
   step()
 
