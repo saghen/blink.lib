@@ -10,12 +10,11 @@
 --- - `async.wrap()` always uses a closure and supports returning a cancellation func, rather than calling `:close()`
 --- - ~-60% lower runtime and ~-50% lower mem usage, see PR for scripts (benchmarks need more verification, ideally some real I/O heavy workloads)
 --- - tracebacks untested (planning to look into it)
---- - simpler (208 LoC ignoring blanks/comments)
+--- - simpler (215 LoC ignoring blanks/comments)
 ---
 --- Remaining work:
 --- - semaphores
 --- - improve stack traces
---- - add `Future:detach()`
 --- - expand test suite (`pwait`, `async.all`, `async.any`, ...)
 --- - expand helpers (`async.schedule`, `async.iter`, ...)
 
@@ -102,23 +101,35 @@ function async.run(fn)
 
     -- async.wrap(fn): pass callback that resumes the coroutine
     if type(yielded[2]) == 'function' then
+      -- this is a bit mind numbing, but we want to make use of tail-call optimization
+      -- when the callback is synchronous. so we store the result of the callback externally
+      -- and return the `step()` call directly, flattening the stack.
+      local sync_ok
+      local sync_result
       local settled = false
+      local sync_phase = true -- whether the callback was called synchronously
       local callback = function(err, ...)
         if settled then return end
         settled = true
-        future.cleanup = nil
-        if err ~= nil then
-          step(false, err)
+        if sync_phase then
+          sync_ok = err == nil
+          sync_result = not sync_ok and { err } or { n = select('#', ...), ... }
         else
-          step(true, ...)
+          -- TODO: async.nvim calls cleanup on settle, not just cancellation
+          future.cleanup = nil
+          if err ~= nil then return step(false, err) end
+          return step(true, ...)
         end
       end
 
       local ok, on_cancel_or_err = pcall(yielded[2], callback)
-      -- synchronous error
+      sync_phase = false
+
       if not ok and not settled then
-        callback(on_cancel_or_err)
-      -- cancellation hook
+        settled = true
+        return step(false, on_cancel_or_err)
+      elseif sync_result then
+        return step(sync_ok, unpack(sync_result))
       elseif type(on_cancel_or_err) == 'function' then
         future.cleanup = on_cancel_or_err
       end
@@ -363,10 +374,7 @@ end
 
 --- @private
 function Future:_finally(cb)
-  if self.state ~= PENDING then
-    cb(self.state == RESOLVED, unpack(self.values))
-    return
-  end
+  if self.state > SETTLING then return cb(self.state == RESOLVED, unpack(self.values)) end
 
   if self.cbs == nil then
     self.cbs = { cb }

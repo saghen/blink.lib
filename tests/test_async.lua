@@ -99,19 +99,17 @@ T['basic']['handles futures that complete with multiple values'] = function()
   eq(r2, 1)
 end
 
--- TODO:
--- T['basic']['does not need new stack frame for non-deferred continuations'] = function()
---   --- @async
---   local function deep(n)
---     if n == 0 then return 'done' end
---     async.wrap(function(cb) cb() end)
---     return deep(n - 1)
---   end
---
---   local res = async.run(function() return deep(10000) end):wait(1000)
---   vim.print(res, 'res')
---   eq(res, 'done')
--- end
+T['basic']['does not need new stack frame for non-deferred continuations'] = function()
+  --- @async
+  local function deep(n)
+    if n == 0 then return 'done' end
+    async.wrap(function(cb) cb() end)
+    return deep(n - 1)
+  end
+
+  local res = async.run(function() return deep(10000) end):wait(1000)
+  eq(res, 'done')
+end
 
 -- ==============================================================
 -- async cancellation
