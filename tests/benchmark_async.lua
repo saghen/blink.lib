@@ -1,7 +1,7 @@
 -- run with: nvim --headless -l tests/benchmark_async.lua
 
 -- TODO: adjust path to point to your async.nvim installation
-package.path = package.path .. ';./lua/?.lua;../async.nvim/lua/?.lua'
+package.path = package.path .. ';./lua/?.lua;./lua/?/init.lua;../async.nvim/lua/?.lua'
 
 local blink = require('blink.lib.async')
 local nvim = require('async')
