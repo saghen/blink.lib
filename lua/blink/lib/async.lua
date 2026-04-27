@@ -4,7 +4,7 @@
 --- Differences from async.nvim:
 --- - .wrap() uses a closure and supports returning a cancellation func
 --- - uv hooks are not automatically closed
---- - ~3-4x faster and significantly simpler (218 LoC ignoring blanks/comments)
+--- - ~2-4x faster and significantly simpler (208 LoC ignoring blanks/comments)
 --- - other?
 ---
 --- Remaining work:
@@ -88,14 +88,7 @@ function async.run(fn)
       -- synchronously returned a task, flatten
       -- async.run(function() return async.run(function() sleep(1) end) end)
       if coroutine.status(co) == 'dead' then
-        if yielded[2] == task then return task:reject('task resolved with itself') end
-        yielded[2]:_finally(function(ok, ...)
-          if ok then
-            task:resolve(...)
-          else
-            task:reject(...)
-          end
-        end)
+        task:resolve(yielded[2])
       -- async.await(task): inside of current task
       else
         yielded[2]:_finally(step)
@@ -216,8 +209,7 @@ function Task:wait(timeout_or_cb)
       if ok then
         timeout_or_cb(nil, ...)
       else
-        local err = select(1, ...)
-        timeout_or_cb(err)
+        timeout_or_cb(...)
       end
     end)
   end
@@ -259,9 +251,9 @@ end
 --- @param self blink.lib.Task<T>
 --- @param ... T
 function Task:resolve(...)
-  local value = select(1, ...)
+  local value = ...
   -- resolving with a value, settle
-  if getmetatable(value) ~= Task or select('#', ...) ~= 0 then return self:_settle(RESOLVED, ...) end
+  if getmetatable(value) ~= Task or select('#', ...) ~= 1 then return self:_settle(RESOLVED, ...) end
 
   -- resolving another task, flatten
   if self.state ~= PENDING then return end
@@ -305,20 +297,18 @@ function Task:_settle(state, ...)
 
   -- gather pending children, or cancel them if this task rejected/cancelled
   local pending_children = {}
-  if self.children ~= nil then
-    for _, child in ipairs(self.children) do
-      if child.state <= SETTLING then
-        -- on error/cancel, cancel children
-        if state ~= RESOLVED then
-          child:cancel()
+  for _, child in ipairs(self.children) do
+    if child.state <= SETTLING then
+      -- on error/cancel, cancel children
+      if state ~= RESOLVED then
+        child:cancel()
         -- otherwise, wait for child to settle
-        else
-          table.insert(pending_children, child)
-        end
+      else
+        table.insert(pending_children, child)
       end
     end
-    self.children = nil
   end
+  self.children = nil
 
   -- no children left, finalize immediately
   if #pending_children == 0 then return self:_finalize(state, ...) end
