@@ -6,6 +6,7 @@ local eq = expect.equality
 
 package.loaded['blink.lib.async'] = nil
 local async = require('blink.lib.async')
+local await = async.await
 
 local T = MiniTest.new_set()
 
@@ -42,12 +43,10 @@ end
 T['basic']['can await a task'] = function()
   local a = async
     .run(function()
-      return async
-        .run(function()
-          sleep(1)
-          return 'JJ'
-        end)
-        :await()
+      return await(async.run(function()
+        sleep(1)
+        return 'JJ'
+      end))
     end)
     :wait(100)
 
@@ -155,7 +154,7 @@ T['cancel']['can cancel nested task awaiting child'] = function()
   local child
   local task = async.run(function()
     child = async.run(eternity)
-    child:await()
+    await(child)
   end)
 
   task:cancel()
@@ -175,7 +174,7 @@ T['cancel']['cancels awaited detached task'] = function()
   local task1 = async.run(eternity)
   task1:cancel()
 
-  local task2 = async.run(function() task1:await() end)
+  local task2 = async.run(function() await(task1) end)
 
   expect_err(task2, 'cancelled')
 end
@@ -279,7 +278,7 @@ T['children']['awaited children complete before parent'] = function()
       sleep(1)
       return 'child done'
     end)
-    return child:await()
+    return await(child)
   end)
 
   eq(parent:wait(100), 'child done')

@@ -4,7 +4,7 @@
 --- Differences from async.nvim:
 --- - .wrap() uses a closure and supports returning a cancellation func
 --- - uv hooks are not automatically closed
---- - ~3-4x faster and significantly simpler (214 LoC ignoring blanks/comments)
+--- - ~3-4x faster and significantly simpler (218 LoC ignoring blanks/comments)
 --- - other?
 ---
 --- Remaining work:
@@ -96,7 +96,7 @@ function async.run(fn)
             task:reject(...)
           end
         end)
-      -- task:await(): inside of current task
+      -- async.await(task): inside of current task
       else
         yielded[2]:_finally(step)
       end
@@ -154,7 +154,7 @@ end
 function async.all(tasks)
   local results = {}
   for i, task in ipairs(tasks) do
-    results[i] = task:await()
+    results[i] = async.await(task)
   end
   return results
 end
@@ -191,19 +191,19 @@ function async.any(tasks)
   end)
 end
 
-------------------
---- Task
-------------------
-
---- Wait for this task to settle (blocking). Must be called from within a `async.run` coroutine.
+--- Wait for this task to settle (blocking). Must be called from within a `async.run` closure.
 --- @generic T
---- @param self blink.lib.Task<T>
+--- @param task blink.lib.Task<T>
 --- @return T...
-function Task:await()
-  local yielded = pack(coroutine.yield(self))
+function async.await(task)
+  local yielded = pack(coroutine.yield(task))
   if not yielded[1] then error(yielded[2], 0) end
   return unpack(yielded, 2)
 end
+
+------------------
+--- Task
+------------------
 
 --- Wait for this task to settle, optionally with a timeout (blocking) or callback (non-blocking)
 --- @generic T
