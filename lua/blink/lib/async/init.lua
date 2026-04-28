@@ -105,8 +105,7 @@ function async.run(fn)
           sync_ok = err == nil
           sync_result = not sync_ok and { err } or { n = select('#', ...), ... }
         else
-          -- TODO: async.nvim calls cleanup on settle, not just cancellation
-          future.cleanup = nil
+          future:_cleanup()
           if err ~= nil then return step(false, err) end
           return step(true, ...)
         end
@@ -115,17 +114,19 @@ function async.run(fn)
       local ok, value = pcall(yielded[2], callback)
       sync_phase = false
 
+      -- store cleanup function
+      if ok and type(value) == 'function' or (type(value) == 'table' and type(value.close) == 'function') then
+        future._cleanup_cb = value
+      end
+
       -- synchronous error()
       if not ok and not settled then
         settled = true
         return step(false, value)
       -- synchronous callback()
       elseif sync_ok ~= nil then
+        future:_cleanup()
         return step(sync_ok, unpack(sync_result))
-      -- TODO: run close if sync
-      -- asynchronously waiting for callback, got cancel function
-      elseif type(value) == 'function' or (type(value) == 'table' and type(value.close) == 'function') then
-        future.cleanup = value
       end
       return
     end
@@ -297,13 +298,13 @@ function Future:close()
   self.state = SETTLING
 
   -- TODO: what to do with cleanup errors?
-  if self.cleanup ~= nil then pcall(self.cleanup) end
   if self.children ~= nil then
     for _, child in ipairs(self.children) do
       if child ~= true then child:close() end
     end
   end
-  self:_finalize(CANCELLED, 'cancelled')
+  self:_finalize(CLOSED, 'closed')
+  self:_cleanup()
 end
 
 --- Pending -> Settling
@@ -365,6 +366,18 @@ function Future:_finalize(state, ...)
       cb(state == RESOLVED, ...)
     end
     self.cbs = nil
+  end
+end
+
+--- @private
+function Future:_cleanup()
+  if self._cleanup_cb ~= nil then
+    if type(self._cleanup_cb) == 'function' then
+      self._cleanup_cb()
+    else
+      self._cleanup_cb:close()
+    end
+    self._cleanup_cb = nil
   end
 end
 
