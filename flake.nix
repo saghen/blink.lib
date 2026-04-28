@@ -1,53 +1,41 @@
 {
   description = "Shared library for blink.* neovim plugins";
 
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    flake-parts.url = "github:hercules-ci/flake-parts";
-  };
+  inputs.nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz";
 
-  outputs =
-    inputs@{ flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "x86_64-linux"
-        "x86_64-darwin"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
+  outputs = {
+    nixpkgs,
+    self,
+  }: let
+    inherit (nixpkgs) lib;
+    inherit (lib.attrsets) genAttrs mapAttrs' nameValuePair;
+    inherit (lib.fileset) fileFilter toSource;
 
-      perSystem =
-        {
-          self',
-          pkgs,
-          lib,
-          ...
-        }:
-        {
-          packages =
-            let
-              fs = lib.fileset;
-              version = "0.1.0";
-            in
-            {
-              blink-lib = pkgs.vimUtils.buildVimPlugin {
-                pname = "blink.lib";
-                inherit version;
-                src = fs.toSource {
-                  root = ./.;
-                  fileset = fs.difference ./. (
-                    fs.unions (
-                      lib.filter builtins.pathExists [
-                        ./flake.nix
-                        ./flake.lock
-                      ]
-                    )
-                  );
-                };
-              };
+    systems = ["x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin"];
+    forAllSystems = genAttrs systems;
+    nixpkgsFor = forAllSystems (system: nixpkgs.legacyPackages.${system});
 
-              default = self'.packages.blink-lib;
-            };
+    blink-lib-package = {vimUtils}:
+      vimUtils.buildVimPlugin {
+        pname = "blink.lib";
+        version = "0.1.0";
+        src = toSource {
+          root = ./.;
+          fileset = fileFilter (file: file.hasExt "lua") ./.;
         };
+      };
+  in {
+    packages = forAllSystems (system: rec {
+      blink-lib = nixpkgsFor.${system}.callPackage blink-lib-package {};
+      default = blink-lib;
+    });
+
+    overlays.default = final: prev: {
+      vimPlugins = prev.vimPlugins.extend (_: _: {
+        blink-lib = final.callPackage blink-lib-package {};
+      });
     };
+
+    checks = forAllSystems (system: mapAttrs' (n: nameValuePair "package-${n}") (removeAttrs self.packages.${system} ["default"]));
+  };
 }
