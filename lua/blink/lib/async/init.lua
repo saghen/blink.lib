@@ -149,7 +149,12 @@ end
 --- @return T...
 function async.wrap(fn)
   local yielded = pack(coroutine.yield(fn))
-  if not yielded[1] then error(yielded[2], 0) end
+  if not yielded[1] then
+    -- add traceback from coroutine
+    -- strip first line (empty) and 'stack traceback:' header
+    local tb = debug.traceback(coroutine.running(), '', 2):gsub('^\n[^\n]*\n', '')
+    error(yielded[2] .. '\n' .. tb, 0)
+  end
   return unpack(yielded, 2)
 end
 
@@ -161,7 +166,13 @@ function async.await(future)
   local yielded = pack(coroutine.yield(future))
   -- child has been awaited by the parent, detach it so we ignore it on completion
   if current_future == future.parent then future:detach() end
-  if not yielded[1] then error(yielded[2], 0) end
+  if not yielded[1] then
+    -- stylua: ignore
+    local tb = debug.traceback(coroutine.running(), '', 2) -- add traceback from coroutine
+      :gsub('^\n[^\n]*\n', '') -- strip first line (empty) and 'stack traceback:' header
+      :gsub('\t([^\n]*)$', '\tawaited at %1') -- prepend `awaited at` to last line (this frame)
+    error(yielded[2] .. '\n' .. tb, 0)
+  end
   return unpack(yielded, 2)
 end
 
