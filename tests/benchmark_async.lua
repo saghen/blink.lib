@@ -47,21 +47,20 @@ end
 local blink_adapter = {
   run = blink.run,
   await_future = blink.await,
-  await_cb = blink.wrap,
-  await_cb_deferred = function() return blink.wrap(vim.schedule) end,
+  await_cb = blink.await,
+  await_cb_deferred = function() return blink.await(vim.schedule) end,
   cancel = function(t) t:cancel() end,
   wait_cb = function(t, cb) t:wait(cb) end,
-  wait_sync = function(t) t:wait() end,
-  pwait_sync = function(t) t:pwait() end,
+  wait_sync = function(t) t:wait(0) end,
+  pwait_sync = function(t) t:pwait(0) end,
   await_never = function()
-    blink.wrap(function(_) end)
+    blink.await(function(_) end)
   end,
   await_never_cleanup = function()
-    blink.wrap(function(_)
+    blink.await(function(_)
       return function() end
     end)
   end,
-  drain_rejected = function(_) end,
 }
 
 local nvim_adapter = {
@@ -85,7 +84,6 @@ local nvim_adapter = {
       }
     end)
   end,
-  drain_rejected = function(t) t:pwait(0) end,
 }
 
 ------------------
@@ -121,7 +119,7 @@ local function make_suite(a)
       'run with rejection (error)',
       100000,
       function()
-        a.drain_rejected(a.run(function() error('nope', 0) end))
+        a.pwait_sync(a.run(function() error('nope', 0) end))
       end,
     },
 

@@ -10,11 +10,7 @@
 --- - `async.wrap()` always uses a closure and supports returning a cancellation func, rather than calling `:close()`
 --- - ~-60% lower runtime and ~-50% lower mem usage, see PR for scripts (benchmarks need more verification, ideally some real I/O heavy workloads)
 --- - no stack traces for non-awaited async.run() futures
---- - simpler (226 LoC ignoring blanks/comments)
----
---- Remaining work:
---- - expand test suite (`pwait`, `async.all`, `async.any`, ...)
---- - expand helpers (`async.schedule`, `async.iter`, ...)
+--- - simpler (247 LoC ignoring blanks/comments)
 
 local function pack(...) return { n = select('#', ...), ... } end
 local _unpack = unpack
@@ -87,17 +83,13 @@ function async.run(fn)
     -- errored, bubble up
     if not yielded[1] then return future:reject(yielded[2]) end
 
-    if #yielded == 2 and getmetatable(yielded[2]) == Future then
-      -- async.run(fn): returned a future, flatten
-      if coroutine.status(co) == 'dead' then return future:resolve(yielded[2]) end
-      -- async.await(future): inside of current future
-      return yielded[2]:_finally(step)
-    end
-
     -- async.run(fn): closure completed, return result
     if coroutine.status(co) == 'dead' then return future:resolve(unpack(yielded, 2)) end
 
-    -- async.wrap(fn): pass callback that resumes the coroutine
+    -- async.await(future): inside of current future
+    if #yielded == 2 and getmetatable(yielded[2]) == Future then return yielded[2]:_finally(step) end
+
+    -- async.await(fn): pass callback that resumes the coroutine
     if type(yielded[2]) == 'function' then
       -- this is a bit mind numbing, but we want to make use of tail-call optimization
       -- when the callback is synchronous. so we store the result of the callback externally
@@ -120,16 +112,20 @@ function async.run(fn)
         end
       end
 
-      local ok, on_cancel_or_err = pcall(yielded[2], callback)
+      local ok, value = pcall(yielded[2], callback)
       sync_phase = false
 
+      -- synchronous error()
       if not ok and not settled then
         settled = true
-        return step(false, on_cancel_or_err)
-      elseif sync_result then
+        return step(false, value)
+      -- synchronous callback()
+      elseif sync_ok ~= nil then
         return step(sync_ok, unpack(sync_result))
-      elseif type(on_cancel_or_err) == 'function' then
-        future.cleanup = on_cancel_or_err
+      -- TODO: run close if sync
+      -- asynchronously waiting for callback, got cancel function
+      elseif type(value) == 'function' or (type(value) == 'table' and type(value.close) == 'function') then
+        future.cleanup = value
       end
       return
     end
@@ -141,32 +137,18 @@ function async.run(fn)
   return future
 end
 
---- Wrap a callback-style function into an async function.
---- @generic T
---- @param fn fun(callback: fun(err?: any, ...: T...)): fun()?
---- @return T...
-function async.wrap(fn)
-  local yielded = pack(coroutine.yield(fn))
-  if not yielded[1] then
-    -- add traceback from coroutine
-    -- strip first line (empty) and 'stack traceback:' header
-    local tb = debug.traceback(coroutine.running(), '', 2):gsub('^\n[^\n]*\n', '')
-    error(yielded[2] .. '\n' .. tb, 0)
-  end
-  return unpack(yielded, 2)
-end
-
 --- Wait for this future to settle (blocking). Must be called from within a `async.run` closure.
 --- @generic T
---- @param future blink.lib.Future<T>
+--- @param future blink.lib.Future<T> | fun(callback: fun(err?: any, ...: T...)): fun()?
 --- @return T...
 function async.await(future)
   local yielded = pack(coroutine.yield(future))
   -- child has been awaited by the parent, detach it so we ignore it on completion
-  if current_future == future.parent then future:detach() end
+  -- TODO: shouldn't this be handled by step()?
+  if getmetatable(future) == Future and current_future == future.parent then future:detach() end
   if not yielded[1] then
     -- stylua: ignore
-    local tb = debug.traceback(coroutine.running(), '', 2) -- add traceback from coroutine
+    local tb = debug.traceback(coroutine.running(), '', 2)
       :gsub('^\n[^\n]*\n', '') -- strip first line (empty) and 'stack traceback:' header
       :gsub('\t([^\n]*)$', '\tawaited at %1') -- prepend `awaited at` to last line (this frame)
     error(yielded[2] .. '\n' .. tb, 0)
@@ -194,9 +176,10 @@ end
 --- @param futures blink.lib.Future<T>[]
 --- @return T...
 function async.any(futures)
-  return async.wrap(function(callback)
+  return async.await(function(callback)
     local remaining = #futures
     for _, future in ipairs(futures) do
+      future:detach()
       future:_finally(function(ok, ...)
         if ok then
           callback(nil, ...)
@@ -357,7 +340,7 @@ function Future:_settle(state, ...)
   local remaining = #filtered_children
   for _, child in ipairs(filtered_children) do
     child:_finally(function(ok, ...)
-      -- if a child rejects and parent was resolving, convert to reject
+      -- if a child rejects, since the parent was resolving, switch to reject
       if not ok and child.state == REJECTED then
         state = REJECTED
         args = pack(...)
@@ -432,7 +415,7 @@ end
 --- @async
 function Semaphore:acquire()
   -- TODO: clear on cancel?
-  if self._available == 0 then async.wrap(function(cb) table.insert(self._waiters, cb) end) end
+  if self._available == 0 then async.await(function(cb) table.insert(self._waiters, cb) end) end
   self._available = self._available - 1
   assert(self._available >= 0, 'Semaphore value is negative')
 end

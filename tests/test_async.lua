@@ -20,13 +20,13 @@ end
 
 --- @async
 local function eternity()
-  async.wrap(function(_callback)
+  async.await(function(_callback)
     -- Never call callback
   end)
 end
 
 local function sleep(ms)
-  async.wrap(function(callback) vim.defer_fn(callback, ms) end)
+  async.await(function(callback) vim.defer_fn(callback, ms) end)
 end
 
 -- ==============================================================
@@ -103,7 +103,7 @@ T['basic']['does not need new stack frame for non-deferred continuations'] = fun
   --- @async
   local function deep(n)
     if n == 0 then return 'done' end
-    async.wrap(function(cb) cb() end)
+    async.await(function(cb) cb() end)
     return deep(n - 1)
   end
 
@@ -125,7 +125,7 @@ end
 
 T['cancel']['can cancel future waiting on a wrapped callback'] = function()
   local future = async.run(function()
-    async.wrap(function(_callback)
+    async.await(function(_callback)
       -- never calls the callback
     end)
   end)
@@ -137,7 +137,7 @@ end
 T['cancel']['wrap callback cancellation hook is invoked'] = function()
   local hook_called = false
   local future = async.run(function()
-    async.wrap(function(_callback)
+    async.await(function(_callback)
       return function() hook_called = true end
     end)
   end)
@@ -183,7 +183,7 @@ end
 T['cancel']['cancellation hook errors are handled'] = function()
   -- If the cleanup function errors, cancellation should still work
   local future = async.run(function()
-    async.wrap(function(_callback)
+    async.await(function(_callback)
       return function() error('CLEANUP_ERROR') end
     end)
   end)
@@ -211,7 +211,7 @@ end
 
 T['errors']['handles errors in wrapped callback functions'] = function()
   local future = async.run(function()
-    async.wrap(function(_callback) error('ERROR') end)
+    async.await(function(_callback) error('ERROR') end)
   end)
   expect_err(future, 'ERROR')
 end
@@ -219,7 +219,7 @@ end
 T['errors']['can pcall errors from wrapped functions'] = function()
   local future = async.run(function()
     return pcall(function()
-      async.wrap(function(_callback) error('ERROR') end)
+      async.await(function(_callback) error('ERROR') end)
     end)
   end)
 
@@ -681,7 +681,7 @@ T['edge']['callback called multiple times is handled gracefully'] = function()
   local results = {}
 
   local future = async.run(function()
-    local result = async.wrap(function(callback)
+    local result = async.await(function(callback)
       call_count = call_count + 1
       callback(nil, 'FIRST_CALL')
 
@@ -716,7 +716,7 @@ T['edge']['async callback called multiple times is ignored'] = function()
   -- Similar to above but where the first call is asynchronous
   local result
   local future = async.run(function()
-    return async.wrap(function(callback)
+    return async.await(function(callback)
       vim.schedule(function() callback(nil, 'FIRST') end)
       vim.defer_fn(function() callback(nil, 'SECOND') end, 5)
     end)
@@ -776,7 +776,7 @@ end
 
 T['edge']['wrap with synchronous callback'] = function()
   local future = async.run(function()
-    return async.wrap(function(cb) cb(nil, 'sync-wrap') end)
+    return async.await(function(cb) cb(nil, 'sync-wrap') end)
   end)
   eq(future:status(), 'resolved')
   eq(future:wait(0), 'sync-wrap')
@@ -784,7 +784,7 @@ end
 
 T['edge']['wrap callback with error as first arg rejects'] = function()
   local future = async.run(function()
-    async.wrap(function(cb) cb('OOPS') end)
+    async.await(function(cb) cb('OOPS') end)
   end)
 
   expect_err(future, 'OOPS')
