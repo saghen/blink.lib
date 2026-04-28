@@ -1,7 +1,7 @@
 --- Structured concurrency where errors propagate up and cancellation propagates down.
 --- Inspired by https://github.com/lewis6991/async.nvim
 ---
---- The primary difference comes from the scheduler, where blink.lib.async uses a synchronous step() closure which owns the coroutine. Every step() inspects the yield()-ed value, and arranges for step() to be called again, or it settles. The code doesn't include the defensive guards that async.nvim has around unexpected coroutine.resumes. It also doesn't (currently) include a trampoline to avoid stack overflows. The event loop comes entirely from the .wrap()-ed Futures, not from the scheduler. An entirely synchronous async.run() call will be run synchronously.
+--- `blink.lib.async` uses a synchronous step() closure which owns the coroutine. Every step() inspects the yield()-ed value, and arranges for step() to be called again, or it settles. The code doesn't include the defensive guards that async.nvim has around unexpected coroutine.resumes. The event loop comes entirely from the .wrap()-ed Futures, not from the scheduler. An entirely synchronous async.run() call will be run synchronously.
 ---
 --- Other differences from async.nvim:
 ---
@@ -9,12 +9,11 @@
 --- - `async.await()` only applies to `Future`s, `async.wrap()` still applies to any `cb` func
 --- - `async.wrap()` always uses a closure and supports returning a cancellation func, rather than calling `:close()`
 --- - ~-60% lower runtime and ~-50% lower mem usage, see PR for scripts (benchmarks need more verification, ideally some real I/O heavy workloads)
---- - tracebacks untested (planning to look into it)
---- - simpler (215 LoC ignoring blanks/comments)
+--- - no stack traces for non-awaited async.run() futures
+--- - simpler (226 LoC ignoring blanks/comments)
 ---
 --- Remaining work:
 --- - semaphores
---- - improve stack traces
 --- - expand test suite (`pwait`, `async.all`, `async.any`, ...)
 --- - expand helpers (`async.schedule`, `async.iter`, ...)
 
@@ -178,6 +177,7 @@ end
 
 --- Return the results of all futures, or error if any future rejects.
 --- All children will be implicitly cancelled on failure.
+--- TODO: rewrite this to return a Future?
 --- @generic T
 --- @param futures blink.lib.Future<T>[]
 --- @return T[]
@@ -189,7 +189,8 @@ function async.all(futures)
   return results
 end
 
---- Return the first future to settle, or error if all futures reject.
+--- Return the first future to settle, or errors if all futures reject.
+--- TODO: rewrite this to return a Future?
 --- @generic T
 --- @param futures blink.lib.Future<T>[]
 --- @return T...
@@ -220,6 +221,7 @@ end
 --- Future
 ------------------
 
+--- Detach a task from its parent, such that the parent will no longer wait for it or cancel it
 function Future:detach()
   if self.parent == nil then return end
   if #self.parent.children == 1 then
@@ -312,7 +314,8 @@ function Future:cancel()
   if self.state ~= PENDING then return end
   self.state = SETTLING
 
-  if self.cleanup ~= nil then self.cleanup() end
+  -- TODO: what to do with cleanup errors?
+  if self.cleanup ~= nil then pcall(self.cleanup) end
   if self.children ~= nil then
     for _, child in ipairs(self.children) do
       if child ~= true then child:cancel() end
