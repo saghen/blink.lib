@@ -4,13 +4,10 @@
 --- `blink.lib.async` uses a synchronous step() closure which owns the coroutine. Every step() inspects the yield()-ed value, and arranges for step() to be called again, or it settles. The code doesn't include the defensive guards that async.nvim has around unexpected coroutine.resumes. The event loop comes entirely from the .wrap()-ed Futures, not from the scheduler. An entirely synchronous async.run() call will be run synchronously.
 ---
 --- Other differences from async.nvim:
----
 --- - not runtime agnostic
---- - `async.await()` only applies to `Future`s, `async.wrap()` still applies to any `cb` func
---- - `async.wrap()` always uses a closure and supports returning a cancellation func, rather than calling `:close()`
 --- - ~-60% lower runtime and ~-50% lower mem usage, see PR for scripts (benchmarks need more verification, ideally some real I/O heavy workloads)
---- - no stack traces for non-awaited async.run() futures
---- - simpler (247 LoC ignoring blanks/comments)
+--- - simpler internal loop (247 LoC ignoring blanks/comments)
+--- - no stack traces for non-awaited Futures
 
 local function pack(...) return { n = select('#', ...), ... } end
 local _unpack = unpack
@@ -158,12 +155,11 @@ function async.await(future)
 end
 
 --- Return the results of all futures, or error if any future rejects.
---- All children will be implicitly cancelled on failure.
---- TODO: rewrite this to return a Future?
 --- @generic T
 --- @param futures blink.lib.Future<T>[]
 --- @return T[]
 function async.all(futures)
+  -- TODO: incorrect
   local results = {}
   for i, future in ipairs(futures) do
     results[i] = async.await(future)
@@ -172,11 +168,11 @@ function async.all(futures)
 end
 
 --- Return the first future to settle, or errors if all futures reject.
---- TODO: rewrite this to return a Future?
 --- @generic T
 --- @param futures blink.lib.Future<T>[]
 --- @return T...
 function async.any(futures)
+  -- TODO: incorrect
   return async.await(function(callback)
     local remaining = #futures
     for _, future in ipairs(futures) do
