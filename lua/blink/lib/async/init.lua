@@ -13,7 +13,6 @@
 --- - simpler (226 LoC ignoring blanks/comments)
 ---
 --- Remaining work:
---- - semaphores
 --- - expand test suite (`pwait`, `async.all`, `async.any`, ...)
 --- - expand helpers (`async.schedule`, `async.iter`, ...)
 
@@ -394,6 +393,58 @@ function Future:_finally(cb)
     self.cbs = { cb }
   else
     table.insert(self.cbs, cb)
+  end
+end
+
+------------------
+--- Semaphore
+------------------
+
+--- @class blink.lib.Semaphore
+--- @field private _available integer
+--- @field private _max integer
+--- @field private _waiters table<integer, blink.lib.Future<nil>>
+local Semaphore = {}
+Semaphore.__index = Semaphore
+
+--- @param permits? integer (default: 1)
+--- @return blink.lib.Semaphore
+function async.semaphore(permits)
+  permits = permits or 1
+  return setmetatable({
+    _available = permits,
+    _max = permits,
+    _waiters = {},
+  }, Semaphore)
+end
+
+function Semaphore:available() return self._available end
+function Semaphore:max() return self._max end
+
+function Semaphore:with(fn)
+  self:acquire()
+  local r = pack(pcall(fn))
+  self:release()
+  if not r[1] then error(r[2]) end
+  return unpack(r, 2)
+end
+
+--- @async
+function Semaphore:acquire()
+  -- TODO: clear on cancel?
+  if self._available == 0 then async.wrap(function(cb) table.insert(self._waiters, cb) end) end
+  self._available = self._available - 1
+  assert(self._available >= 0, 'Semaphore value is negative')
+end
+
+--- @async
+function Semaphore:release()
+  if self._available >= self._max then error('Semaphore value is greater than max permits', 2) end
+  self._available = self._available + 1
+  -- wake up acquires while we have permits
+  while self._available > 0 and #self._waiters > 0 do
+    local waiter = table.remove(self._waiters, 1)
+    waiter()
   end
 end
 
