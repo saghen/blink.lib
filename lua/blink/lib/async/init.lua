@@ -20,7 +20,7 @@ local PENDING = 1
 local SETTLING = 2
 local RESOLVED = 3
 local REJECTED = 4
-local CANCELLED = 5
+local CLOSED = 5
 
 -- Track the currently-running future (the "parent" context)
 local current_future = nil
@@ -72,7 +72,7 @@ function async.run(fn)
   end
 
   local function step(...)
-    -- cancelled while suspended
+    -- closed while suspended
     if future.state ~= PENDING then return end
 
     local prev = current_future
@@ -190,10 +190,10 @@ function async.any(futures)
       end)
     end
 
-    -- propagate cancellation
+    -- propagate close
     return function()
       for _, future in ipairs(futures) do
-        future:cancel()
+        future:close()
       end
     end
   end)
@@ -203,7 +203,7 @@ end
 --- Future
 ------------------
 
---- Detach a task from its parent, such that the parent will no longer wait for it or cancel it
+--- Detach a task from its parent, such that the parent will no longer wait for it or close it
 function Future:detach()
   if self.parent == nil then return end
   if #self.parent.children == 1 then
@@ -250,13 +250,13 @@ function Future:pwait(timeout_or_cb)
   return pcall(self.wait, self, timeout_or_cb)
 end
 
---- @return 'pending' | 'settling' | 'resolved' | 'rejected' | 'cancelled'
+--- @return 'pending' | 'settling' | 'resolved' | 'rejected' | 'closed'
 function Future:status()
   if self.state == PENDING then return 'pending' end
   if self.state == SETTLING then return 'settling' end
   if self.state == RESOLVED then return 'resolved' end
   if self.state == REJECTED then return 'rejected' end
-  if self.state == CANCELLED then return 'cancelled' end
+  if self.state == CLOSED then return 'closed' end
   error('unknown state: ' .. tostring(self.state))
 end
 
@@ -291,8 +291,8 @@ end
 --- @param err any
 function Future:reject(err) self:_settle(REJECTED, err) end
 
---- Cancel this future and all its children
-function Future:cancel()
+--- Close this future and all its children
+function Future:close()
   if self.state ~= PENDING then return end
   self.state = SETTLING
 
@@ -300,7 +300,7 @@ function Future:cancel()
   if self.cleanup ~= nil then pcall(self.cleanup) end
   if self.children ~= nil then
     for _, child in ipairs(self.children) do
-      if child ~= true then child:cancel() end
+      if child ~= true then child:close() end
     end
   end
   self:_finalize(CANCELLED, 'cancelled')
@@ -320,7 +320,7 @@ function Future:_settle(state, ...)
   -- if we're not resolving successfully, cancel all children and finalize
   if state ~= RESOLVED then
     for _, child in ipairs(self.children) do
-      if child ~= true then child:cancel() end
+      if child ~= true then child:close() end
     end
     return self:_finalize(state, ...)
   end
@@ -351,7 +351,7 @@ function Future:_settle(state, ...)
   end
 end
 
---- Settling -> Resolved/Rejected/Cancelled
+--- Settling -> Resolved/Rejected/Closed
 --- Runs all callbacks
 --- @private
 function Future:_finalize(state, ...)
@@ -414,7 +414,7 @@ end
 
 --- @async
 function Semaphore:acquire()
-  -- TODO: clear on cancel?
+  -- TODO: clear on close?
   if self._available == 0 then async.await(function(cb) table.insert(self._waiters, cb) end) end
   self._available = self._available - 1
   assert(self._available >= 0, 'Semaphore value is negative')

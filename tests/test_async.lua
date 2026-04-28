@@ -119,8 +119,8 @@ T['cancel'] = MiniTest.new_set()
 
 T['cancel']['can cancel futures'] = function()
   local future = async.run(eternity)
-  future:cancel()
-  expect_err(future, 'cancelled')
+  future:close()
+  expect_err(future, 'closed')
 end
 
 T['cancel']['can cancel future waiting on a wrapped callback'] = function()
@@ -130,8 +130,8 @@ T['cancel']['can cancel future waiting on a wrapped callback'] = function()
     end)
   end)
 
-  future:cancel()
-  expect_err(future, 'cancelled')
+  future:close()
+  expect_err(future, 'closed')
 end
 
 T['cancel']['wrap callback cancellation hook is invoked'] = function()
@@ -142,8 +142,8 @@ T['cancel']['wrap callback cancellation hook is invoked'] = function()
     end)
   end)
 
-  future:cancel()
-  expect_err(future, 'cancelled')
+  future:close()
+  expect_err(future, 'closed')
   eq(hook_called, true)
 end
 
@@ -154,30 +154,30 @@ T['cancel']['can cancel nested future awaiting child'] = function()
     await(child)
   end)
 
-  future:cancel()
+  future:close()
 
-  expect_err(future, 'cancelled')
-  expect_err(child, 'cancelled')
+  expect_err(future, 'closed')
+  expect_err(child, 'closed')
 end
 
 T['cancel']['can timeout futures'] = function()
   local future = async.run(eternity)
   expect_err(future, 'timeout', 10)
-  future:cancel()
-  expect_err(future, 'cancelled')
+  future:close()
+  expect_err(future, 'closed')
 end
 
 T['cancel']['cancels awaited detached future'] = function()
   local future1 = async.run(eternity)
-  future1:cancel()
+  future1:close()
 
   local future2 = async.run(function() await(future1) end)
 
-  expect_err(future2, 'cancelled')
+  expect_err(future2, 'closed')
 end
 
 T['cancel']['cancelling child does not cancel parent'] = function()
-  async.run(function() async.run(eternity):cancel() end):wait(100)
+  async.run(function() async.run(eternity):close() end):wait(100)
 end
 
 T['cancel']['cancellation hook errors are handled'] = function()
@@ -189,9 +189,9 @@ T['cancel']['cancellation hook errors are handled'] = function()
   end)
 
   -- cancelling should not throw even if cleanup errors
-  local ok = pcall(function() future:cancel() end)
+  local ok = pcall(function() future:close() end)
   -- Either cancel succeeded silently or propagated - either way, verify behavior
-  if ok then expect_err(future, 'cancelled') end
+  if ok then expect_err(future, 'closed') end
 end
 
 -- ==============================================================
@@ -306,7 +306,7 @@ T['children'] = MiniTest.new_set()
 
 T['children']['waits for child futures when parent settles'] = function()
   -- This is explicitly noted as a difference from async.nvim:
-  -- unawaited children are cancelled when parent settles.
+  -- unawaited children are closed when parent settles.
   local child
   local parent = async.run(function()
     child = async.run(function() sleep(1) end)
@@ -341,9 +341,9 @@ T['children']['cancelling parent cancels suspended child'] = function()
     sleep(10)
   end)
 
-  parent:cancel()
-  expect_err(parent, 'cancelled')
-  expect_err(child, 'cancelled')
+  parent:close()
+  expect_err(parent, 'closed')
+  expect_err(child, 'closed')
 end
 
 T['children']['automatically awaits child futures'] = function()
@@ -372,10 +372,10 @@ T['children']['children finishing before parent does not fail parent'] = functio
 end
 
 T['children']['cancelling child does not cancel parent'] = function()
-  async.run(function() async.run(eternity):cancel() end):wait(100)
+  async.run(function() async.run(eternity):close() end):wait(100)
 end
 
-T['children']['deeply nested children all cancelled with root'] = function()
+T['children']['deeply nested children all close with root'] = function()
   local c1, c2, c3
   local root = async.run(function()
     c1 = async.run(function()
@@ -391,11 +391,11 @@ T['children']['deeply nested children all cancelled with root'] = function()
   -- let the tree build up
   vim.wait(10, function() return c3 ~= nil end)
 
-  root:cancel()
-  expect_err(root, 'cancelled')
-  expect_err(c1, 'cancelled')
-  expect_err(c2, 'cancelled')
-  expect_err(c3, 'cancelled')
+  root:close()
+  expect_err(root, 'closed')
+  expect_err(c1, 'closed')
+  expect_err(c2, 'closed')
+  expect_err(c3, 'closed')
 end
 
 -- ==============================================================
@@ -427,8 +427,8 @@ T['detach']['cancelling parent does not cancel detached child'] = function()
     sleep(100)
   end)
 
-  parent:cancel()
-  expect_err(parent, 'cancelled')
+  parent:close()
+  expect_err(parent, 'closed')
 
   child:wait(100)
   eq(child:status(), 'resolved')
@@ -729,8 +729,8 @@ end
 T['edge']['status reflects lifecycle'] = function()
   local future = async.run(eternity)
   eq(future:status(), 'pending')
-  future:cancel()
-  eq(future:status(), 'cancelled')
+  future:close()
+  eq(future:status(), 'closed')
 end
 
 T['edge']['resolving future with itself rejects'] = function()
@@ -746,7 +746,7 @@ end
 T['edge']['cancel on already-resolved future is no-op'] = function()
   local future = async.run(function() return 42 end)
   eq(future:wait(100), 42)
-  future:cancel()
+  future:close()
   eq(future:status(), 'resolved')
   eq(future:wait(100), 42)
 end
@@ -754,17 +754,17 @@ end
 T['edge']['cancel on already-rejected future is no-op'] = function()
   local future = async.run(function() error('ERR') end)
   expect_err(future, 'ERR')
-  future:cancel()
+  future:close()
   eq(future:status(), 'rejected')
   expect_err(future, 'ERR')
 end
 
 T['edge']['multiple cancel calls are safe'] = function()
   local future = async.run(eternity)
-  future:cancel()
-  future:cancel()
-  future:cancel()
-  expect_err(future, 'cancelled')
+  future:close()
+  future:close()
+  future:close()
+  expect_err(future, 'closed')
 end
 
 T['edge']['synchronous future resolves synchronously'] = function()
