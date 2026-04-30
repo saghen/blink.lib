@@ -26,6 +26,7 @@ All APIs are unstable until v1!
 - [`blink.lib.log`](#blinkliblog): Notifications and logging to file and/or console
 - [`blink.lib.nvim`](#blinklibnvim): Re-exported nvim APIs (`nvim.create_buf(...)`)
 - [`blink.lib.timer`](#blinklibtimer): Timers with automatically schedule callbacks with support for cancellation, without racing
+- [`blink.lib.bench`](#blinklibbench): Benchmarking API (see `benches/**/*.lua`)
 
 ### Roadmap
 
@@ -259,3 +260,42 @@ new_timer:start(0, 0, function() print('hello') end)
 new_timer:stop()
 -- timer stopped and scheduled callback cancelled
 ```
+
+### `blink.lib.bench`
+
+Statistics-driven micro-benchmarking API inspired by [criterion](https://criterion-rs.github.io/book/criterion_rs.html). Bench files live in `benches/**/*.lua` and are run in a clean headless Neovim instance with manual GC and JIT.
+
+- `:BlinkBench [filter]`: run all `benches/**/*.lua` files (optionally filtered by substring) in a terminal split to the right
+- `require('blink.lib.bench').setup()`: register the `:BlinkBench` command
+- `require('blink.lib.bench').run_file()`: run benches for the current file only
+- `require('blink.lib.bench').run_files(filter)`: run all `benches/**/*.lua` files programmatically
+
+```lua
+local b = require('blink.lib.bench')
+
+b.run('my bench', function()
+  -- code to measure
+end)
+b.run('customized bench', function()
+  -- code to measure
+end, { warmup = '100ms', measurement = '1s', output = 'verbose', save = false })
+
+-- receive a report and comapre two runs
+local fast_report = b.run('fast bench', function() end)
+local slow_report = b.run('slow bench', function() end)
+fast_report:compare(slow_report)
+
+-- groups (can set options for all nested benches)
+local group = b.group('table insertion')
+-- local group = b.group('table insertion', { warmup = '500ms', measurement = '5s', output = 'verbose', save = false })
+group.run('tbl[#tbl + 1] = val', function()
+  local tbl = {}
+  for i = 1, 100 do tbl[#tbl + 1] = i end
+end)
+group.run('table.insert', function()
+  local tbl = {}
+  for i = 1, 100 do table.insert(tbl, i) end
+end)
+```
+
+Results are saved to `{stdpath('state')}/blink/bench/{module}/{group}.{name}.json` and compared against the previous run automatically. Set `save = false` to disable this behavior.
