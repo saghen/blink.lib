@@ -1,74 +1,70 @@
+local list = require('blink.lib._.list')
+local utils = require('blink.lib.bench.utils')
 local stats = require('blink.lib.bench.stats')
 local Report = require('blink.lib.bench.report')
+local color = require('blink.lib.bench.color')
 
+--- @class blink.lib.bench
 local M = {}
 
---- Opaque sink to defeat dead-code elimination.
---- Users call bench.black_box(v) to ensure `v` is considered used.
-local _sink
-function M.black_box(v)
-  _sink = v
-  return v
-end
+--- @param group string | string[]
+--- @param default_opts? blink.lib.bench.RunOpts
+--- @return blink.lib.bench.Group
+function M.group(group, default_opts)
+  if type(group) == 'string' then group = { group } end
+  return {
+    --- @param name string
+    --- @param fn fun(): any
+    --- @param opts? blink.lib.bench.RunOpts
+    --- @return blink.lib.bench.Report
+    run = function(name, fn, opts)
+      opts = vim.tbl_extend('force', default_opts or {}, opts or {})
+      opts.group = list.flatten({ group, opts.group or {} })
+      return M.run(name, fn, opts)
+    end,
 
---- Parse "500ms", "2s", "1m", or a number (seconds) into nanoseconds.
-local function parse_duration(d)
-  if type(d) == 'number' then return d * 1e9 end
-  local n, unit = d:match('^(%d+%.?%d*)(%a+)$')
-  assert(n, 'invalid duration: ' .. tostring(d))
-  n = tonumber(n)
-  if unit == 'ns' then return n end
-  if unit == 'us' then return n * 1e3 end
-  if unit == 'ms' then return n * 1e6 end
-  if unit == 's' then return n * 1e9 end
-  if unit == 'm' then return n * 60e9 end
-  error('unknown unit: ' .. unit)
+    --- @param name string
+    group = function(name) return M.group(vim.list_extend(vim.deepcopy(group), { name })) end,
+  }
 end
-
-local DEFAULTS = {
-  warmup = '500ms',
-  measurement = '5s',
-  min_samples = 10,
-  confidence = 0.95,
-  bootstrap_resamples = 1000,
-}
 
 --- @class blink.lib.bench.RunOpts
+--- @field group string[] Current group of benchmarks (default: {})
 --- @field warmup string Time to spend warming up before starting measurements (default: 500ms)
 --- @field measurement string Time to spend measuring (default: 5s)
 --- @field min_samples integer Minimum number of samples to take (default: 10)
---- @field confidence number Confidence level for statistical analysis (default: 0.95)
---- @field bootstrap_resamples integer
+--- @field output boolean | 'verbose' Print output (default: true)
+--- @field save boolean Save output to file (default: true)
 
 --- @param name string
 --- @param fn fun(): any
 --- @param opts? blink.lib.bench.RunOpts
 --- @return blink.lib.bench.Report
 function M.run(name, fn, opts)
-  opts = vim.tbl_extend('force', DEFAULTS, opts or {})
-  local warmup_ns = parse_duration(opts.warmup)
-  local measurement_ns = parse_duration(opts.measurement)
-  local hrtime, black_box = require('blink.lib.bench.timer'), M.black_box
+  opts = vim.tbl_extend(
+    'force',
+    { module = '', group = {}, warmup = '500ms', measurement = '5s', min_samples = 10, output = true, save = true },
+    opts or {}
+  )
 
-  -- Clear JIT state for consistent warmup
-  if jit then
-    jit.flush()
-    jit.on()
-  end
+  local warmup_ns = utils.parse_duration(opts.warmup)
+  local measurement_ns = utils.parse_duration(opts.measurement)
+  local hrtime = vim.uv.hrtime
 
   -- Phase 1: Warmup + find optimal batch size
   local warmup_end = hrtime() + warmup_ns
   local batch = 1
   local target_batch_ns = 1e6 -- ~10000x timer resolution (100µs)
+  if jit then jit.flush() end -- clear JIT state
 
   while hrtime() < warmup_end do
     local t0 = hrtime()
     for _ = 1, batch do
-      black_box(fn())
+      fn()
     end
     local elapsed = hrtime() - t0
 
-    -- Scale batch toward target; cap growth so we don't overshoot.
+    -- Scale batch toward target; cap growth so we don't overshoot
     if elapsed < target_batch_ns then
       local scale = math.max(2, math.min(10, target_batch_ns / math.max(elapsed, 1)))
       batch = math.ceil(batch * scale)
@@ -82,49 +78,39 @@ function M.run(name, fn, opts)
   local batch_sizes = {}
   local batch_times = {}
   local total_iters = 0
-
   local measure_start = hrtime()
-  local measure_end = measure_start + measurement_ns
 
-  -- Cycle batch size through [batch, 1.5 * batch,  2 * batch] to measure overhead
-  local sizes = { batch, math.ceil(batch * 1.5), batch * 2 }
+  -- Cycle batch size through [batch, 2 * batch,  3 * batch] to measure overhead
+  local sizes = { batch, math.ceil(batch * 2), batch * 3 }
   local idx = 1
 
-  collectgarbage('stop')
-  while true do
-    local now = hrtime()
-    if now >= measure_end and #samples >= opts.min_samples then break end
+  utils.with_manual_gc(function()
+    while true do
+      local now = hrtime()
+      if now >= measure_start + measurement_ns and #samples >= opts.min_samples then break end
 
-    local n = sizes[idx]
-    idx = (idx % #sizes) + 1
+      local n = sizes[idx]
+      idx = (idx % #sizes) + 1
 
-    collectgarbage('collect')
-    collectgarbage('collect') -- twice to handle finalizers
-    local t0 = hrtime()
-    for _ = 1, n do
-      black_box(fn())
+      collectgarbage('collect')
+      collectgarbage('collect') -- twice to handle finalizers
+      local t0 = hrtime()
+      for _ = 1, n do
+        fn()
+      end
+      local elapsed = hrtime() - t0
+
+      samples[#samples + 1] = elapsed / n
+      batch_sizes[#batch_sizes + 1] = n
+      batch_times[#batch_times + 1] = elapsed
+      total_iters = total_iters + n
     end
-    local elapsed = hrtime() - t0
+  end)
 
-    samples[#samples + 1] = elapsed / n
-    batch_sizes[#batch_sizes + 1] = n
-    batch_times[#batch_times + 1] = elapsed
-    total_iters = total_iters + n
-  end
-  collectgarbage('restart')
-
-  local total_duration = hrtime() - measure_start
-
-  local report = Report.new(name, samples, {
-    confidence = opts.confidence,
-    bootstrap_resamples = opts.bootstrap_resamples,
-    _iters = total_iters,
-    _dur = total_duration,
-  })
-
-  -- Prefer the regression estimate for the headline mean (removes timer overhead)
+  local report = Report.new(opts.module, opts.group, name, samples, total_iters, batch_sizes, batch_times)
   report.mean = stats.fit_slope(batch_sizes, batch_times)
-
+  if opts.output then report:summary(opts.output == 'verbose') end
+  if opts.save then report:save() end
   return report
 end
 

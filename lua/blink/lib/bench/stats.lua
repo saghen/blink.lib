@@ -27,7 +27,7 @@ function M.mean(t)
 end
 
 function M.std_dev(t, m)
-  m = m or mean(t)
+  m = m or M.mean(t)
   local s = 0
   for i = 1, #t do
     local d = t[i] - m
@@ -61,24 +61,29 @@ function M.classify_outliers(sorted)
   return o
 end
 
---- Bootstrap confidence interval for the mean
+--- Bootstrap confidence interval for the regression slope (per-op cost)
+--- Resamples (batch_sizes, batch_times) pairs and recomputes the slope each time,
+--- so the CI is on the same estimator as the reported mean.
 --- Returns (lower, upper) at confidence level (e.g. 0.95)
-function M.bootstrap_ci(samples, confidence, resamples)
+function M.bootstrap_ci_slope(batch_sizes, batch_times, confidence, resamples)
   resamples = resamples or 1000
-  local n = #samples
-  if n < 2 then return samples[1] or 0, samples[1] or 0 end
+  local n = #batch_sizes
+  if n < 2 then return batch_times[1] / batch_sizes[1], batch_times[1] / batch_sizes[1] end
 
-  local means = {}
+  local slopes = {}
   for r = 1, resamples do
-    local sum = 0
+    local sxx, sxy = 0, 0
     for _ = 1, n do
-      sum = sum + samples[math.random(n)]
+      local i = math.random(n)
+      local x = batch_sizes[i]
+      sxx = sxx + x * x
+      sxy = sxy + x * batch_times[i]
     end
-    means[r] = sum / n
+    slopes[r] = sxy / sxx
   end
-  table.sort(means)
+  table.sort(slopes)
   local alpha = (1 - confidence) / 2
-  return M.percentile(means, alpha), M.percentile(means, 1 - alpha)
+  return M.percentile(slopes, alpha), M.percentile(slopes, 1 - alpha)
 end
 
 --- Simple linear regression through the origin: y = k*x
