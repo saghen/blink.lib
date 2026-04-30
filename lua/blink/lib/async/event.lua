@@ -1,4 +1,4 @@
-local async = require('blink.lib.async')
+local await = require('blink.lib.async').await
 --- @class blink.lib.async.Event
 local Event = {}
 Event.__index = Event
@@ -25,7 +25,7 @@ end
 
 function Event:wait()
   if self._set then return end
-  async.await(function(cb)
+  await(function(cb)
     local idx = #self._waiters + 1
     self._waiters[idx] = cb
 

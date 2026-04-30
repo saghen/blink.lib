@@ -104,6 +104,52 @@ T['with']['returns values from function'] = function()
     :wait(100)
 end
 
+T['with']['passes extra arguments to function'] = function()
+  async
+    .run(function()
+      local m = async.mutex()
+      local got_a, got_b
+      m:with(function(a, b)
+        got_a = a
+        got_b = b
+      end, 'hello', 42)
+      eq(got_a, 'hello')
+      eq(got_b, 42)
+    end)
+    :wait(100)
+end
+
+-- ==============================================================
+-- try_lock
+-- ==============================================================
+
+T['try_lock'] = MiniTest.new_set()
+
+T['try_lock']['succeeds when mutex is unlocked'] = function()
+  async
+    .run(function()
+      local m = async.mutex()
+      m:try_lock()
+      eq(m:available(), false)
+      eq(m:is_held_by_current_task(), true)
+      m:unlock()
+    end)
+    :wait(100)
+end
+
+T['try_lock']['errors when mutex is already locked'] = function()
+  async
+    .run(function()
+      local m = async.mutex()
+      m:lock()
+      local ok, err = pcall(function() m:try_lock() end)
+      eq(ok, false)
+      assert(tostring(err):match('try_lock'), 'Expected try_lock error, got: ' .. tostring(err))
+      m:unlock()
+    end)
+    :wait(100)
+end
+
 -- ==============================================================
 -- Mutual exclusion
 -- ==============================================================

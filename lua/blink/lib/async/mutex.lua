@@ -11,16 +11,27 @@ function Mutex.new() return setmetatable({ waiters = WaitQueue.new() }, Mutex) e
 function Mutex:available() return self.co == nil end
 function Mutex:is_held_by_current_task() return self.co == coroutine.running() end
 
-function Mutex:with(fn)
+--- @generic A
+--- @generic T
+--- @param fn fun(...: A...): T...
+--- @param ... A
+--- @return T...
+function Mutex:with(fn, ...)
   self:lock()
-  local r = pack_len(pcall(fn))
+  local r = pack_len(pcall(fn, ...))
   self:unlock()
   if not r[1] then error(r[2]) end
   return unpack(r, 2, r.n)
 end
 
+--- @async
 function Mutex:lock()
-  if self.co ~= nil then self.waiters:await() end
+  if self.co ~= nil then self.waiters:wait() end
+  self.co = coroutine.running()
+end
+
+function Mutex:try_lock()
+  if self.co ~= nil then error('called try_lock() on Mutex that is already locked', 2) end
   self.co = coroutine.running()
 end
 

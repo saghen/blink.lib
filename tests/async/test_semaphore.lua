@@ -95,6 +95,39 @@ T['release']['errors when exceeding max permits'] = function()
 end
 
 -- ==============================================================
+-- try_acquire
+-- ==============================================================
+
+T['try_acquire'] = MiniTest.new_set()
+
+T['try_acquire']['succeeds when permits are available'] = function()
+  local sem = async.semaphore(2)
+  async
+    .run(function()
+      sem:try_acquire()
+      eq(sem.available, 1)
+      sem:try_acquire()
+      eq(sem.available, 0)
+    end)
+    :wait(100)
+end
+
+T['try_acquire']['errors when no permits are available'] = function()
+  local sem = async.semaphore(1)
+  async
+    .run(function()
+      sem:try_acquire()
+      local ok, err = pcall(function() sem:try_acquire() end)
+      eq(ok, false)
+      assert(
+        tostring(err):match('no available permits'),
+        'Expected "no available permits", got: ' .. tostring(err)
+      )
+    end)
+    :wait(100)
+end
+
+-- ==============================================================
 -- Blocking behaviour
 -- ==============================================================
 

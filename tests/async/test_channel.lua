@@ -35,7 +35,7 @@ T['basic']['receiver waits for sender'] = function()
   async
     .run(function()
       local recv = async.run(function()
-        local ok, val = ch:receive()
+        local ok, val = ch:recv()
         eq(ok, true)
         received = val
       end)
@@ -55,7 +55,7 @@ T['basic']['sender fills buffer before receiver arrives'] = function()
   async
     .run(function()
       ch:send('world')
-      local ok, val = ch:receive()
+      local ok, val = ch:recv()
       eq(ok, true)
       received = val
     end)
@@ -75,7 +75,7 @@ T['basic']['values arrive in FIFO order'] = function()
       ch:send(2)
       ch:send(3)
       for _ = 1, 3 do
-        local ok, v = ch:receive()
+        local ok, v = ch:recv()
         eq(ok, true)
         table.insert(results, v)
       end
@@ -87,8 +87,6 @@ end
 
 -- ==============================================================
 -- Bounded channel capacity
--- BUG: #self._buffer > self._capacity uses > instead of >=,
---      so a capacity=1 channel can hold 2 items before blocking.
 -- ==============================================================
 
 T['bounded'] = MiniTest.new_set()
@@ -111,7 +109,7 @@ T['bounded']['sender blocks when buffer is at capacity'] = function()
       end)
 
       table.insert(order, 'before-receive')
-      local ok, v = ch:receive()
+      local ok, v = ch:recv()
       eq(ok, true)
       eq(v, 'a')
 
@@ -140,7 +138,7 @@ T['bounded']['capacity=2 allows exactly 2 items'] = function()
       end)
 
       eq(blocked, true)
-      ch:receive() -- free one slot
+      ch:recv() -- free one slot
       eq(blocked, false)
     end)
     :wait(200)
@@ -160,13 +158,13 @@ T['bounded']['sender unblocks after receiver consumes'] = function()
         sent_val = 'second'
       end)
 
-      local ok1, v1 = ch:receive() -- drains, wakes sender
+      local ok1, v1 = ch:recv() -- drains, wakes sender
       eq(ok1, true)
       eq(v1, 'first')
 
       await(sender)
 
-      local ok2, v2 = ch:receive()
+      local ok2, v2 = ch:recv()
       eq(ok2, true)
       eq(v2, 'second')
     end)
@@ -197,7 +195,7 @@ T['rendezvous']['sender blocks until receiver is ready'] = function()
       sleep(10) -- sender should be blocked
 
       table.insert(order, 'before-receive')
-      local ok, v = ch:receive()
+      local ok, v = ch:recv()
       eq(ok, true)
       eq(v, 'sync')
       table.insert(order, 'received')
@@ -219,7 +217,7 @@ T['rendezvous']['receiver blocks until sender sends'] = function()
     .run(function()
       local receiver = async.run(function()
         table.insert(order, 'recv-start')
-        local ok, v = ch:receive()
+        local ok, v = ch:recv()
         eq(ok, true)
         eq(v, 'ping')
         table.insert(order, 'recv-done')
@@ -256,7 +254,7 @@ T['close']['receive on closed empty channel returns false'] = function()
 
   async
     .run(function()
-      local ok = ch:receive()
+      local ok = ch:recv()
       eq(ok, false)
     end)
     :wait(100)
@@ -273,9 +271,9 @@ T['close']['buffered items are still readable after close'] = function()
       ch:send('y')
       ch:close()
 
-      local ok1, v1 = ch:receive()
-      local ok2, v2 = ch:receive()
-      local ok3 = ch:receive()
+      local ok1, v1 = ch:recv()
+      local ok2, v2 = ch:recv()
+      local ok3 = ch:recv()
 
       table.insert(results, { ok1, v1 })
       table.insert(results, { ok2, v2 })
@@ -289,7 +287,6 @@ T['close']['buffered items are still readable after close'] = function()
 end
 
 -- A receiver blocked on an empty channel must wake up when the channel closes.
--- BUG: close() does not call waiting receiver callbacks.
 T['close']['close wakes blocked receiver'] = function()
   local ch = async.channel(1)
   local ok_result
@@ -297,7 +294,7 @@ T['close']['close wakes blocked receiver'] = function()
   async
     .run(function()
       local receiver = async.run(function()
-        local ok = ch:receive() -- blocks; channel is empty
+        local ok = ch:recv() -- blocks; channel is empty
         ok_result = ok
       end)
 
@@ -399,6 +396,108 @@ T['iter']['iter works with async producer'] = function()
 end
 
 -- ==============================================================
+-- try_send / try_recv
+-- ==============================================================
+
+T['try_send'] = MiniTest.new_set()
+
+T['try_send']['inserts into buffer when space is available'] = function()
+  local ch = async.channel(2)
+  ch:try_send('a')
+  ch:try_send('b')
+
+  async
+    .run(function()
+      local ok1, v1 = ch:recv()
+      local ok2, v2 = ch:recv()
+      eq(ok1, true)
+      eq(v1, 'a')
+      eq(ok2, true)
+      eq(v2, 'b')
+    end)
+    :wait(100)
+end
+
+T['try_send']['errors when buffer is full'] = function()
+  local ch = async.channel(1)
+  ch:try_send('first')
+  local ok, err = pcall(function() ch:try_send('second') end)
+  eq(ok, false)
+  assert(tostring(err):match('channel is full'), 'Expected "channel is full", got: ' .. tostring(err))
+end
+
+T['try_send']['errors when channel is closed'] = function()
+  local ch = async.channel(1)
+  ch:close()
+  local ok, err = pcall(function() ch:try_send('x') end)
+  eq(ok, false)
+  assert(tostring(err):match('send on closed channel'), 'Expected "send on closed channel", got: ' .. tostring(err))
+end
+
+T['try_recv'] = MiniTest.new_set()
+
+T['try_recv']['returns value when buffer has items'] = function()
+  local ch = async.channel(2)
+  ch:try_send('x')
+  ch:try_send('y')
+
+  async
+    .run(function()
+      local ok1, v1 = ch:try_recv()
+      local ok2, v2 = ch:try_recv()
+      eq(ok1, true)
+      eq(v1, 'x')
+      eq(ok2, true)
+      eq(v2, 'y')
+    end)
+    :wait(100)
+end
+
+T['try_recv']['errors when buffer is empty and channel is open'] = function()
+  local ch = async.channel(1)
+  async
+    .run(function()
+      local ok, err = pcall(function() ch:try_recv() end)
+      eq(ok, false)
+      assert(tostring(err):match('channel is empty'), 'Expected "channel is empty", got: ' .. tostring(err))
+    end)
+    :wait(100)
+end
+
+T['try_recv']['returns false when buffer is empty and channel is closed'] = function()
+  local ch = async.channel(1)
+  ch:close()
+
+  async
+    .run(function()
+      local ok = ch:try_recv()
+      eq(ok, false)
+    end)
+    :wait(100)
+end
+
+T['try_recv']['wakes a blocked sender after consuming'] = function()
+  local ch = async.channel(1)
+  local sent = false
+
+  async
+    .run(function()
+      ch:send('first') -- fills buffer
+
+      local sender = async.run(function()
+        ch:send('second') -- blocks
+        sent = true
+      end)
+
+      ch:try_recv() -- drains, should wake sender
+      await(sender)
+    end)
+    :wait(200)
+
+  eq(sent, true)
+end
+
+-- ==============================================================
 -- Task close
 -- ==============================================================
 
@@ -407,14 +506,14 @@ T['task close'] = MiniTest.new_set()
 T['task close']['closing a task cancels receiver'] = function()
   local ch = async.channel(0)
 
-  local ok, val = async
+  local ok, ok2, val = async
     .run(function()
-      async.run(function() ch:receive() end):close()
+      async.run(function() ch:recv() end):close()
       async.run(function() ch:send('hello') end)
-      return ch:receive()
+      return ch:recv()
     end)
-    :wait(100)
-  vim.print(ok, val)
+    :pwait(100)
+  vim.print(ok, ok2, val)
   eq(ok, true)
   eq(val, 'hello')
 end
@@ -426,7 +525,7 @@ T['task close']['closing a task cancels sender'] = function()
     .run(function()
       async.run(function() ch:send('hello') end):close()
       async.run(function() ch:send('world') end)
-      return ch:receive()
+      return ch:recv()
     end)
     :wait(100)
   eq(ok, true)

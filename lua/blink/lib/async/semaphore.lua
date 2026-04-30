@@ -28,13 +28,19 @@ function Semaphore:acquire()
   assert(self.available >= 0, 'Semaphore value is negative')
 end
 
+function Semaphore:try_acquire()
+  if self.available == 0 then error('Semaphore has no available permits', 2) end
+  self.available = self.available - 1
+  assert(self.available >= 0, 'Semaphore value is negative')
+  return true
+end
+
 --- @async
 function Semaphore:release()
   if self.available >= self.max then error('Semaphore value is greater than max permits', 2) end
   self.available = self.available + 1
   -- wake up acquire() while we have permits
-  while self.available > 0 and self.waiters:wake() do
-  end
+  self.waiters:wake()
 end
 
 return Semaphore
