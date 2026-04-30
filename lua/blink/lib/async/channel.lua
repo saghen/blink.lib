@@ -54,6 +54,6 @@ function Channel:close()
   end
 end
 
-function Channel:is_closed() return self._closed end
+function Channel:is_closing() return self._closed end
 
 return Channel
