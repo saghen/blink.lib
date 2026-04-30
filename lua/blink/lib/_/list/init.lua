@@ -10,6 +10,7 @@ return {
   filter_map = require('blink.lib._.list.filter_map'),
   find = require('blink.lib._.list.find'),
   find_idx = require('blink.lib._.list.find_idx'),
+  flatten = require('blink.lib._.list.flatten'),
   get = vim.tbl_get,
   is = vim.islist,
   index_of = require('blink.lib._.list.index_of'),
