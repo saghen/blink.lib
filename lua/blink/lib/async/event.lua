@@ -9,6 +9,7 @@ function Event:is_set() return self._set end
 function Event:set()
   if self._set then return end
   self._set = true
+
   local waiters = self._waiters
   for _, waiter in ipairs(waiters) do
     if waiter then waiter() end
@@ -16,12 +17,23 @@ function Event:set()
   self._waiters = nil
 end
 
+function Event:clear()
+  if not self._set then return end
+  self._set = false
+  self._waiters = {}
+end
+
 function Event:wait()
   if self._set then return end
   async.await(function(cb)
     local idx = #self._waiters + 1
     self._waiters[idx] = cb
-    return function() self._waiters[idx] = false end -- cleanup on close
+
+    -- cleanup on close
+    return function()
+      if self._waiters[idx] ~= cb then return end
+      self._waiters[idx] = false
+    end
   end)
 end
 

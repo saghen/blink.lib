@@ -74,6 +74,64 @@ T['basic']['wait() blocks until set'] = function()
   eq(order, { 'before_set', 'after_wait' })
 end
 
+T['basic']['clear() on new event is a no-op'] = function()
+  local e = async.event()
+  e:clear()
+  eq(e:is_set(), false)
+end
+
+T['basic']['clear() unsets the event'] = function()
+  local e = async.event()
+  e:set()
+  eq(e:is_set(), true)
+  e:clear()
+  eq(e:is_set(), false)
+end
+
+T['basic']['clear() is idempotent'] = function()
+  local e = async.event()
+  e:set()
+  e:clear()
+  e:clear()
+  e:clear()
+  eq(e:is_set(), false)
+end
+
+T['basic']['wait() blocks after clear()'] = function()
+  local e = async.event()
+  e:set()
+  e:clear()
+
+  local order = {}
+
+  async
+    .run(function()
+      local waiter = async.run(function()
+        e:wait()
+        table.insert(order, 'after_wait')
+      end)
+
+      sleep(10)
+      table.insert(order, 'before_set')
+      e:set()
+
+      await(waiter)
+    end)
+    :wait(200)
+
+  eq(order, { 'before_set', 'after_wait' })
+end
+
+T['basic']['set()/clear()/set() cycle works'] = function()
+  local e = async.event()
+  e:set()
+  eq(e:is_set(), true)
+  e:clear()
+  eq(e:is_set(), false)
+  e:set()
+  eq(e:is_set(), true)
+end
+
 -- ==============================================================
 -- Multiple waiters
 -- ==============================================================
@@ -154,6 +212,55 @@ T['waiters']['new waiter after set returns immediately'] = function()
     :wait(100)
 
   eq(ran, true)
+end
+
+T['waiters']['clear() does not wake existing waiters'] = function()
+  local e = async.event()
+  local woken = false
+
+  async
+    .run(function()
+      local waiter = async.run(function()
+        e:wait()
+        woken = true
+      end)
+
+      sleep(10)
+      e:clear() -- should not wake the waiter
+      sleep(10)
+      eq(woken, false)
+
+      e:set()
+      await(waiter)
+    end)
+    :wait(200)
+
+  eq(woken, true)
+end
+
+T['waiters']['waiters registered after clear() block until next set()'] = function()
+  local e = async.event()
+  e:set()
+  e:clear()
+
+  local order = {}
+
+  async
+    .run(function()
+      local waiter = async.run(function()
+        e:wait()
+        table.insert(order, 'after_wait')
+      end)
+
+      sleep(10)
+      table.insert(order, 'before_set')
+      e:set()
+
+      await(waiter)
+    end)
+    :wait(200)
+
+  eq(order, { 'before_set', 'after_wait' })
 end
 
 -- ==============================================================
