@@ -283,8 +283,10 @@ function M.types.map(key_type, value_type)
       if type(val) ~= 'table' then return false, ': expected table, got ' .. M.utils.describe_value(val) end
 
       for k, v in pairs(val) do
-        local ok, _ = M.utils.validate_value(k, key_type)
+        local ok, err = M.utils.validate_value(k, key_type)
         if not ok then
+          if err then return false, err end
+
           local msg = ('[%s](key): expected %s, got %s'):format(
             M.utils.describe_literal(k),
             M.utils.describe_type(key_type),
@@ -293,8 +295,10 @@ function M.types.map(key_type, value_type)
           return false, msg
         end
 
-        local ok, _ = M.utils.validate_value(v, value_type)
+        local ok, err = M.utils.validate_value(v, value_type)
         if not ok then
+          if err then return false, err end
+
           local msg = ('[%s](key): expected %s, got %s'):format(
             M.utils.describe_literal(k),
             M.utils.describe_type(value_type),
