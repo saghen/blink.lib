@@ -1,5 +1,3 @@
---- @diagnostic disable: global-in-non-module
-
 local MiniTest = require('mini.test')
 local expect = MiniTest.expect
 local eq = expect.equality
@@ -134,7 +132,7 @@ T['cancel']['can cancel future waiting on a wrapped callback'] = function()
   expect_err(future, 'closed')
 end
 
-T['cancel']['wrap callback cancellation hook is invoked'] = function()
+T['cancel']['cancellation hook is invoked'] = function()
   local hook_called = false
   local future = async.run(function()
     async.await(function(_callback)
@@ -180,18 +178,16 @@ T['cancel']['cancelling child does not cancel parent'] = function()
   async.run(function() async.run(eternity):close() end):wait(100)
 end
 
-T['cancel']['cancellation hook errors are handled'] = function()
-  -- If the cleanup function errors, cancellation should still work
+-- TODO: what should we do with the errors? this could silently leak resources
+T['cancel']['cancellation hook errors are ignored'] = function()
   local future = async.run(function()
     async.await(function(_callback)
       return function() error('CLEANUP_ERROR') end
     end)
   end)
 
-  -- cancelling should not throw even if cleanup errors
-  local ok = pcall(function() future:close() end)
-  -- Either cancel succeeded silently or propagated - either way, verify behavior
-  if ok then expect_err(future, 'closed') end
+  future:close()
+  expect_err(future, 'closed')
 end
 
 -- ==============================================================

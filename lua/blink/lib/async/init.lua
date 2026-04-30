@@ -145,8 +145,8 @@ function async.await(future)
   -- TODO: shouldn't this be handled by step()?
   if getmetatable(future) == Future and current_future == future.parent then future:detach() end
   if not yielded[1] then
-    -- stylua: ignore
-    local tb = debug.traceback(coroutine.running(), '', 2)
+    local tb = debug
+      .traceback(coroutine.running(), '', 2)
       :gsub('^\n[^\n]*\n', '') -- strip first line (empty) and 'stack traceback:' header
       :gsub('\t([^\n]*)$', '\tawaited at %1') -- prepend `awaited at` to last line (this frame)
     error(yielded[2] .. '\n' .. tb, 0)
@@ -195,6 +195,20 @@ function async.any(futures)
     end
   end)
 end
+
+--- @param capacity? integer 0 = rendezvous, N = bounded (default: 0)
+--- @return blink.lib.async.Channel
+function async.channel(capacity) return require('blink.lib.async.channel').new(capacity) end
+
+--- @return blink.lib.async.Event
+function async.event() return setmetatable({ _set = false, _waiters = {} }, require('blink.lib.async.event')) end
+
+--- @return blink.lib.async.Mutex
+function async.mutex() return require('blink.lib.async.mutex').new() end
+
+--- @param permits? integer (default: 1)
+--- @return blink.lib.async.Semaphore
+function async.semaphore(permits) return require('blink.lib.async.semaphore').new(permits) end
 
 ------------------
 --- Future
@@ -385,58 +399,6 @@ function Future:_finally(cb)
     self.cbs = { cb }
   else
     table.insert(self.cbs, cb)
-  end
-end
-
-------------------
---- Semaphore
-------------------
-
---- @class blink.lib.Semaphore
---- @field private _available integer
---- @field private _max integer
---- @field private _waiters table<integer, blink.lib.Future<nil>>
-local Semaphore = {}
-Semaphore.__index = Semaphore
-
---- @param permits? integer (default: 1)
---- @return blink.lib.Semaphore
-function async.semaphore(permits)
-  permits = permits or 1
-  return setmetatable({
-    _available = permits,
-    _max = permits,
-    _waiters = {},
-  }, Semaphore)
-end
-
-function Semaphore:available() return self._available end
-function Semaphore:max() return self._max end
-
-function Semaphore:with(fn)
-  self:acquire()
-  local r = pack(pcall(fn))
-  self:release()
-  if not r[1] then error(r[2]) end
-  return unpack(r, 2)
-end
-
---- @async
-function Semaphore:acquire()
-  -- TODO: clear on close?
-  if self._available == 0 then async.await(function(cb) table.insert(self._waiters, cb) end) end
-  self._available = self._available - 1
-  assert(self._available >= 0, 'Semaphore value is negative')
-end
-
---- @async
-function Semaphore:release()
-  if self._available >= self._max then error('Semaphore value is greater than max permits', 2) end
-  self._available = self._available + 1
-  -- wake up acquires while we have permits
-  while self._available > 0 and #self._waiters > 0 do
-    local waiter = table.remove(self._waiters, 1)
-    waiter()
   end
 end
 
