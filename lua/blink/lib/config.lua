@@ -273,26 +273,34 @@ function M.types.list(inner_type)
   end)
 end
 
+--- Ensure both keys and values are validated.
+--- @param key_type blink.lib.ConfigSchemaType
+--- @param value_type blink.lib.ConfigSchemaType
 function M.types.map(key_type, value_type)
   return M.types.validator(
     'map(' .. M.utils.describe_type(key_type) .. ', ' .. M.utils.describe_type(value_type) .. ')',
     function(val)
-      if not type(val) == 'table' then return false end
+      if type(val) ~= 'table' then return false, ': expected table, got ' .. M.utils.describe_value(val) end
+
       for k, v in pairs(val) do
-        local ok = M.utils.validate_value(k, key_type)
-        if ok == false then
-          return false,
-            ': expected all keys to be ' .. M.utils.describe_type(key_type) .. ', got ' .. M.utils.describe_value(k)
+        local ok, _ = M.utils.validate_value(k, key_type)
+        if not ok then
+          local msg = ('[%s](key): expected %s, got %s'):format(
+            M.utils.describe_literal(k),
+            M.utils.describe_type(key_type),
+            M.utils.describe_value(k)
+          )
+          return false, msg
         end
-        local ok = M.utils.validate_value(v, value_type)
-        if ok == false then
-          return false,
-            '['
-              .. M.utils.describe_literal(k)
-              .. ']: expected '
-              .. M.utils.describe_type(value_type)
-              .. ', got '
-              .. M.utils.describe_value(v)
+
+        local ok, _ = M.utils.validate_value(v, value_type)
+        if not ok then
+          local msg = ('[%s](key): expected %s, got %s'):format(
+            M.utils.describe_literal(k),
+            M.utils.describe_type(value_type),
+            M.utils.describe_value(k)
+          )
+          return false, msg
         end
       end
       return true
