@@ -332,23 +332,24 @@ end
 --- Check a value against a type spec (list of strings/validators)
 --- @param val any
 --- @param t blink.lib.ConfigSchemaType
---- @return boolean
+--- @return boolean, string?
 function M.utils.validate_value(val, t)
   if M.types.is_validator(t) then
     local ok, err = t.validator(val)
-    return ok
+    return ok, err
   end
 
   if type(t) ~= 'table' then t = { t } end
   for _, t in ipairs(t) do
     if M.types.is_validator(t) then
       local ok, err = t.validator(val)
-      if ok then return true end
+      if ok then return true, nil end
     elseif type(val) == t then
-      return true
+      return true, nil
     end
   end
-  return false
+
+  return false, nil
 end
 
 --- Extracts the default values from a schema
