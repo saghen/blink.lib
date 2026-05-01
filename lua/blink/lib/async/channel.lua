@@ -34,6 +34,7 @@ function Channel:send(value)
   if self._tail - self._head + 1 < self.capacity then
     self._tail = self._tail + 1
     self._buffer[self._tail] = value
+    return
   end
 
   -- buffer full, wait until receiver tells us to try again
