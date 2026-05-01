@@ -74,20 +74,20 @@ function Report:compare(baseline)
   local ci_overlap = self.ci_lower < baseline.ci_upper and baseline.ci_lower < self.ci_upper
   local significant = not ci_overlap and math.abs(pct) >= 2
 
-  add('%s  vs  %s', self:format_name(), self:format_name())
+  add('%s  vs  %s', self:format_name(), baseline:format_name())
 
   local self_mean = self.mean
   local baseline_mean = baseline.mean
   local delta = baseline_mean - self_mean
   local pct = delta / baseline_mean * 100
   add(
-    '  {cyan}%-10s{/} %s  vs  %s   Δ {%s}%s  (%+.2f%%){/}',
+    '  {cyan}%-10s{/} %s  vs  %s   {%s}%s (%s){/}',
     'time:',
     color.style('bold', self_mean < baseline_mean and significant, fmt_time(self_mean)),
     color.style('bold', baseline_mean < self_mean and significant, fmt_time(baseline_mean)),
     not significant and 'dim' or (delta > 0 and 'bright_green' or 'bright_red'),
-    fmt_time(delta, true),
-    pct
+    fmt_percent_delta(baseline_mean, self_mean, 5),
+    fmt_time(-delta, true)
   )
 
   add(
@@ -97,16 +97,10 @@ function Report:compare(baseline)
     fmt_time(self.ci_upper),
     fmt_time(baseline.ci_lower),
     fmt_time(baseline.ci_upper),
-    ci_overlap and '' or color.format('  {yellow}(no overlap){/}')
+    ci_overlap and color.format('  {red}(overlapping){/}') or ''
   )
 
-  if not significant then
-    add('{dim}no significant difference{/}')
-  elseif delta < 0 then
-    add('{bold,blue}%s{/}: {bright_red}slower{/} by {bright_red}%.2f%%{/}', baseline.name, math.abs(pct))
-  else
-    add('{bold,magenta}%s{/}: {bright_green}faster{/} by {bright_green}%.2f%%{/}', self.name, math.abs(pct))
-  end
+  if not significant then add('{dim}no significant difference{/}') end
 
   color.print(table.concat(lines, '\n') .. '\n')
 end
@@ -170,7 +164,6 @@ function Report:summary(verbose)
         o.severe_low,
         o.severe_high
       )
-      if pct > 10 then add('  {bold,bright_red}!!! high outlier ratio !!!{/}') end
     end
   end
 

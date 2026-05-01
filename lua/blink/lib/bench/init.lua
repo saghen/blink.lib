@@ -12,45 +12,17 @@ function M.setup()
 end
 
 function M.run_files(filter)
-  -- Collect lua/ dirs from current session's rtp as package.path entries
-  -- (avoids adding to rtp which would trigger plugin/ftplugin auto-loading)
-  local paths = {}
-  for _, rtp in ipairs(vim.api.nvim_list_runtime_paths()) do
-    local lua_dir = rtp .. '/lua'
-    if vim.uv.fs_stat(lua_dir) then
-      paths[#paths + 1] = lua_dir .. '/?.lua'
-      paths[#paths + 1] = lua_dir .. '/?/init.lua'
-    end
-  end
-
-  -- Find bench files, optionally filtered by arg
+  -- find benches/**/*.lua, optionally filtered
   local files = vim.fn.glob('benches/**/*.lua', false, true)
   if filter and filter ~= '' then files = list.filter(function(f) return f:find(filter, 1, true) end, files) end
   if #files == 0 then return vim.notify('no bench files found', vim.log.levels.WARN, { title = 'blink.lib.bench' }) end
 
-  -- Write a temp runner that sets package.path and dofiles each bench
-  local runner = vim.fn.tempname() .. '.lua'
-  local lines = {
-    string.format('package.path = %q .. ";" .. package.path', table.concat(paths, ';')),
-    -- set global `module` to cwd folder name
-    string.format('require("blink.lib.bench").module = "%s"', vim.fs.basename(vim.fn.getcwd())),
-  }
-  for _, f in ipairs(files) do
-    lines[#lines + 1] = string.format('dofile(%q)', vim.fn.fnamemodify(f, ':p'))
-  end
-  vim.fn.writefile(lines, runner)
-
-  -- Open a scratch terminal buffer to the right
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_open_win(buf, true, { split = 'right' })
-  vim.bo[buf].bufhidden = 'wipe'
-  vim.fn.termopen({ 'nvim', '--clean', '--headless', '-l', runner })
-  vim.keymap.set('n', 'q', '<cmd>close<cr>', { buffer = buf, silent = true })
+  require('blink.lib.bench.runner').run(vim.fn.getcwd(), files)
 end
 
 function M.run_file()
   local file = vim.fs.relpath(vim.fn.getcwd(), vim.fn.expand('%:p'))
-  M.run_files(file)
+  require('blink.lib.bench.runner').run(vim.fn.getcwd(), { file })
 end
 
 ---------------------

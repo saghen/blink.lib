@@ -22,7 +22,7 @@ end
 
 --- Convert nanonseconds to a human-readable string (e.g. 1.23 µs)
 function M.fmt_time(ns, include_sign)
-  local sign = include_sign and ns >= 0 and '+' or ''
+  local sign = include_sign and (ns >= 0 and '+' or '-') or ''
   local abs = math.abs(ns)
   if abs < 1e3 then return string.format('%s%s ns', sign, fmt_num(abs)) end
   if abs < 1e6 then return string.format('%s%s µs', sign, fmt_num(abs / 1e3)) end
@@ -30,9 +30,9 @@ function M.fmt_time(ns, include_sign)
   return string.format('%s%s s', sign, fmt_num(abs / 1e9))
 end
 
-function M.fmt_percent_delta(prev, curr)
+function M.fmt_percent_delta(prev, curr, width)
   local sign = curr > prev and '+' or '-'
-  return string.format('%s%s%%', sign, fmt_num(math.abs((curr - prev) / prev * 100), 7))
+  return string.format('%s%s%%', sign, fmt_num(math.abs((curr - prev) / prev * 100), width or 7))
 end
 
 --- Parse "500ms", "2s", "1m", or a number (seconds) into nanoseconds
