@@ -68,6 +68,8 @@ function async.run(fn)
     future.parent_child_idx = #current_future.children
   end
 
+  -- main loop
+  local cb_state, cb
   local function step(...)
     -- closed while suspended
     if future.state ~= PENDING then return end
@@ -88,43 +90,41 @@ function async.run(fn)
 
     -- async.await(fn): pass callback that resumes the coroutine
     if type(yielded[2]) == 'function' then
-      -- this is a bit mind numbing, but we want to make use of tail-call optimization
-      -- when the callback is synchronous. so we store the result of the callback externally
-      -- and return the `step()` call directly, flattening the stack.
-      local sync_ok
-      local sync_result
-      local settled = false
-      local sync_phase = true -- whether the callback was called synchronously
-      local callback = function(err, ...)
-        if settled then return end
-        settled = true
-        if sync_phase then
-          sync_ok = err == nil
-          sync_result = not sync_ok and { err } or { n = select('#', ...), ... }
-        else
-          future:_cleanup()
-          if err ~= nil then return step(false, err) end
-          return step(true, ...)
+      -- create the closure once, but on-demand
+      if cb_state == nil then
+        -- this is a bit mind numbing, but we want to make use of tail-call optimization
+        -- when the callback is synchronous. so we store the result of the callback externally
+        -- and return the `step()` call directly, flattening the stack.
+        cb_state = {}
+        cb = function(err, ...)
+          if cb_state.settled then return end
+          cb_state.settled = true
+
+          if cb_state.sync_phase then
+            cb_state.sync_ok = err == nil
+            cb_state.sync_value = err == nil and { n = select('#', ...), ... } or { err }
+          else
+            future._cleanup_cb = nil
+            if err ~= nil then return step(false, err) end
+            return step(true, ...)
+          end
         end
       end
 
-      local ok, value = pcall(yielded[2], callback)
-      sync_phase = false
+      cb_state.settled = false
+      cb_state.sync_phase = true
+      local ok, err_or_cleanup = pcall(yielded[2], cb)
+      cb_state.sync_phase = false
 
-      -- store cleanup function
-      if ok and type(value) == 'function' or (type(value) == 'table' and type(value.close) == 'function') then
-        future._cleanup_cb = value
-      end
-
-      -- synchronous error()
-      if not ok and not settled then
-        settled = true
-        return step(false, value)
       -- synchronous callback()
-      elseif sync_ok ~= nil then
-        future:_cleanup()
-        return step(sync_ok, unpack(sync_result))
+      if cb_state.settled then return step(cb_state.sync_ok, unpack(cb_state.sync_value)) end
+      -- synchronous error()
+      if not ok then
+        cb_state.settled = true
+        return step(false, err_or_cleanup)
       end
+      -- store cleanup function
+      if type(err_or_cleanup) == 'function' then future._cleanup_cb = err_or_cleanup end
       return
     end
 
