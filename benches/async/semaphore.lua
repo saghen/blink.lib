@@ -14,15 +14,23 @@ b.run('uncontended acquire/release', function()
 end)
 
 b.run('contended: single permit', function()
-  local s = a.semaphore(1)
-  local tasks = {}
-  for _ = 1, 100 do
-    tasks[#tasks + 1] = a.run(function()
-      s:acquire()
-      s:release()
+  local s = a.semaphore(100)
+  a.run(function()
+    a.run(function()
+      for _ = 1, 100 do
+        s:acquire()
+      end
+      a.await(vim.schedule)
+      for _ = 1, 100 do
+        s:release()
+      end
     end)
-  end
-  for _, t in ipairs(tasks) do t:wait() end
+    a.run(function()
+      for _ = 1, 100 do
+        s:acquire()
+      end
+    end)
+  end)
 end)
 
 b.run('multiple permits: bounded concurrency', function()
@@ -34,5 +42,7 @@ b.run('multiple permits: bounded concurrency', function()
       s:release()
     end)
   end
-  for _, t in ipairs(tasks) do t:wait() end
+  for _, t in ipairs(tasks) do
+    t:wait()
+  end
 end)

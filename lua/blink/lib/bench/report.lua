@@ -136,13 +136,12 @@ function Report:summary(verbose)
   if self.prev then
     local pct_delta = math.abs((self.prev.mean - self.mean) / self.prev.mean * 100)
     add(
-      '  {cyan}%-10s{/} [{dim}%s{/} {bold,%s}%s{/} {dim}%s{/}]%s',
+      '  {cyan}%-10s{/} [{dim}%s{/} {bold,%s}%s{/} {dim}%s{/}]',
       'change:',
       fmt_percent_delta(self.prev.ci_lower, self.ci_lower),
       pct_delta < 2 and '' or self.mean > self.prev.mean and 'bright_red' or 'bright_green',
       fmt_percent_delta(self.prev.mean, self.mean),
-      fmt_percent_delta(self.prev.ci_upper, self.ci_upper),
-      pct_delta < 2 and '  {cyan}insignificant (<2%){/}' or ''
+      fmt_percent_delta(self.prev.ci_upper, self.ci_upper)
     )
   end
 

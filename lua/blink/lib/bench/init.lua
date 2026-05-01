@@ -29,6 +29,10 @@ end
 --- Benchmarking API
 ---------------------
 
+local _sink
+--- Ensures the JIT compiler doesn't perform dead code elimination
+function M.black_box(v) _sink = v end
+
 --- @param group string | string[]
 --- @param default_opts? blink.lib.bench.RunOpts
 --- @return blink.lib.bench.Group
@@ -51,6 +55,7 @@ function M.group(group, default_opts)
 end
 
 --- @class blink.lib.bench.RunOpts
+--- @field module string Current module name (default: blink.lib.bench.module)
 --- @field group string[] Current group of benchmarks (default: {})
 --- @field warmup string Time to spend warming up before starting measurements (default: 500ms)
 --- @field measurement string Time to spend measuring (default: 5s)
@@ -65,7 +70,7 @@ end
 function M.run(name, fn, opts)
   opts = vim.tbl_extend(
     'force',
-    { group = {}, warmup = '500ms', measurement = '5s', min_samples = 10, output = true, save = true },
+    { group = {}, warmup = '500ms', measurement = '3s', min_samples = 10, output = true, save = true },
     opts or {}
   )
 

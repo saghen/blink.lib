@@ -23,7 +23,7 @@ end
 
 --- @async
 function Semaphore:acquire()
-  if self.available == 0 then self.waiters:await() end
+  if self.available == 0 then self.waiters:wait() end
   self.available = self.available - 1
   assert(self.available >= 0, 'Semaphore value is negative')
 end
