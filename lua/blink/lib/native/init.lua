@@ -1,5 +1,7 @@
 local os = jit.os:lower()
 local lib_extension = (os == 'osx' or os == 'mac') and '.dylib' or os == 'windows' and '.dll' or '.so'
+-- TODO: support "lib" prefix on Windows MSYS2?
+local lib_prefix = (os == 'windows' and '') or 'lib'
 
 --- @class blink.lib.native
 local native = {}
@@ -12,7 +14,14 @@ function native.platform()
   local arch = platform.arch()
   local libc = platform.libc(os)
   local triple = platform.triple(os, arch, libc)
-  return { os = os, arch = arch, libc = libc, triple = triple, lib_extension = lib_extension }
+  return {
+    os = os,
+    arch = arch,
+    libc = libc,
+    triple = triple,
+    lib_extension = lib_extension,
+    lib_prefix = lib_prefix,
+  }
 end
 
 --- @param name string Name of the artifact to be used when requiring it (e.g. 'blink_cmp_fuzzy')
@@ -21,7 +30,7 @@ end
 --- @return string library_path
 function native.library_path(name, commit_hash, dir)
   dir = dir and vim.fs.normalize(dir) or (vim.fn.stdpath('data') .. '/site/lib')
-  local path = dir .. '/lib' .. name .. lib_extension
+  local path = dir .. '/' .. lib_prefix .. name .. lib_extension
   if commit_hash ~= nil then return path .. '.' .. commit_hash:sub(1, 7) end
   return path
 end
@@ -32,11 +41,11 @@ end
 function native.resolve(name, commit_hash)
   -- $runtimepath/lib/lib*.so.hash
   local lib_paths = commit_hash ~= nil
-      and vim.api.nvim_get_runtime_file('lib/lib' .. name .. lib_extension .. '.' .. commit_hash:sub(1, 7), true)
+      and vim.api.nvim_get_runtime_file('lib/' .. lib_prefix .. name .. lib_extension .. '.' .. commit_hash:sub(1, 7), true)
     or {}
   if #lib_paths == 0 then
     -- fallback to $runtimepath/lib/lib*.so
-    lib_paths = vim.api.nvim_get_runtime_file('lib/lib' .. name .. lib_extension, true)
+    lib_paths = vim.api.nvim_get_runtime_file('lib/' .. lib_prefix .. name .. lib_extension, true)
   end
 
   if #lib_paths > 1 then
