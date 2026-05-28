@@ -346,10 +346,9 @@ end
 --- @generic T
 --- @param self blink.lib.Task<T>
 --- @param timeout number Timeout in milliseconds
---- @param interval? number Polling interval in milliseconds (default: 20)
 --- @return T? result
 function task:wait(timeout)
-  vim.wait(timeout, function() return self.status ~= STATUS.RUNNING end, 20)
+  vim.wait(timeout, function() return self.status ~= STATUS.RUNNING end)
 
   if self.status == STATUS.COMPLETED then
     return self.result
@@ -362,5 +361,7 @@ function task:wait(timeout)
     error('Task timed out after ' .. timeout .. ' milliseconds')
   end
 end
+
+function task:pwait(timeout) return pcall(self.wait, self, timeout) end
 
 return task
