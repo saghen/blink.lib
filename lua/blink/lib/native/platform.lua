@@ -11,6 +11,7 @@ local platform = {
     linux = {
       arm64 = function(libc) return 'aarch64-unknown-linux-' .. libc end,
       x64 = function(libc) return 'x86_64-unknown-linux-' .. libc end,
+      loongarch64 = function(libc) return 'loongarch64-unknown-linux-' .. libc end,
     },
     android = {
       arm64 = 'aarch64-linux-android',
@@ -28,9 +29,9 @@ local platform = {
 }
 
 --- @alias blink.lib.native.OS 'windows'|'linux'|'mac'|'freebsd'|'openbsd'|'netbsd'|'bsd'|'other'
---- @alias blink.lib.native.Arch 'x86'|'x64'|'arm'|'arm64'|'arm64be'|'ppc'|'ppc64'|'ppc64le'|'mips'|'mipsel'|'mips64'|'mips64el'|string
+--- @alias blink.lib.native.Arch 'x86'|'x64'|'arm'|'arm64'|'arm64be'|'ppc'|'ppc64'|'ppc64le'|'mips'|'mipsel'|'mips64'|'mips64el'|'loongarch64'|string
 --- @alias blink.lib.native.Libc 'gnu'|'musl'
---- @alias blink.lib.native.Triple 'aarch64-apple-darwin'|'x86_64-apple-darwin'|'aarch64-pc-windows-msvc'|'x86_64-pc-windows-msvc'|'aarch64-unknown-linux-gnu'|'aarch64-unknown-linux-musl'|'aarch64-unknown-freebsd'|'x86_64-unknown-linux-gnu'|'x86_64-unknown-linux-musl'|'x86_64-unknown-freebsd'|'x86_64-unknown-openbsd'|'aarch64-unknown-openbsd'
+--- @alias blink.lib.native.Triple 'aarch64-apple-darwin'|'x86_64-apple-darwin'|'aarch64-pc-windows-msvc'|'x86_64-pc-windows-msvc'|'aarch64-unknown-linux-gnu'|'aarch64-unknown-linux-musl'|'aarch64-unknown-freebsd'|'x86_64-unknown-linux-gnu'|'x86_64-unknown-linux-musl'|'x86_64-unknown-freebsd'|'x86_64-unknown-openbsd'|'aarch64-unknown-openbsd'|'loongarch64-unknown-linux-gnu'|'loongarch64-unknown-linux-musl'
 --- @alias blink.lib.native.LibExtension '.so'|'.dylib'|'.dll'
 
 --- @class blink.lib.native.Platform

@@ -15,6 +15,7 @@ local system = {
       android = 'aarch64-linux-android',
       arm = function(libc) return 'aarch64-unknown-linux-' .. libc end,
       x64 = function(libc) return 'x86_64-unknown-linux-' .. libc end,
+      loongarch64 = function(libc) return 'loongarch64-unknown-linux-' .. libc end,
     },
     freebsd = {
       x64 = 'x86_64-unknown-freebsd',
