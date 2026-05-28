@@ -93,12 +93,12 @@ function Channel:iter()
   end
 end
 
-function Channel:close()
+function Channel:close(err)
   if self._closed then return end
   self._closed = true
   while self._senders:wake('send on closed channel') do
   end
-  while self._receivers:wake() do
+  while self._receivers:wake(err) do
   end
 end
 
