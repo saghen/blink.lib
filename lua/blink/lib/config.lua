@@ -11,60 +11,10 @@
 --- @field blocked_filetypes? string[]
 --- @field callback? fun(enable: boolean, filter?: blink.lib.Filter) Note that `filter.bufnr = 0` will be replaced with the current buffer
 
+local CATCHALL = {} -- sentinel for `types.catchall()`
+
 --- @class blink.lib.config
 local M = { types = {}, utils = {} }
-
---- @param module_name string
---- @param opts blink.lib.EnableOpts?
-function M.new_enable(module_name, opts)
-  local blocked_buftypes = {}
-  for _, buftype in ipairs(opts.blocked_buftypes or {}) do
-    blocked_buftypes[buftype] = true
-  end
-  local blocked_filetypes = {}
-  for _, filetype in ipairs(opts.blocked_filetypes or {}) do
-    blocked_filetypes[filetype] = true
-  end
-
-  -- TODO: how to handle cmdline/term?
-
-  return {
-    enable = function(enable, filter)
-      if enable == nil then enable = true end
-
-      if filter ~= nil and filter.bufnr ~= nil then
-        local bufnr = filter.bufnr == 0 and vim.api.nvim_get_current_buf() or filter.bufnr
-        vim.b[bufnr][module_name] = enable
-      else
-        vim.g[module_name] = enable
-      end
-
-      if opts ~= nil and opts.callback ~= nil then opts.callback(enable, filter) end
-    end,
-    is_enabled = function(filter)
-      -- per buffer
-      if filter ~= nil and filter.bufnr ~= nil then
-        local bufnr = filter.bufnr == 0 and vim.api.nvim_get_current_buf() or filter.bufnr
-        if vim.b[bufnr][module_name] ~= nil then return vim.b[bufnr][module_name] == true end
-        if opts.alternate_module_names ~= nil then
-          for _, alt_module_name in ipairs(opts.alternate_module_names or {}) do
-            if vim.b[bufnr][alt_module_name] ~= nil then return vim.b[bufnr][alt_module_name] == true end
-          end
-        end
-
-        if blocked_buftypes[vim.bo[bufnr].buftype] then return false end
-        if blocked_filetypes[vim.bo[bufnr].filetype] then return false end
-      end
-
-      -- global
-      if vim.g[module_name] ~= nil then return vim.g[module_name] ~= false end
-      for _, alt_module_name in ipairs(opts.alternate_module_names or {}) do
-        if vim.g[alt_module_name] ~= nil then return vim.g[alt_module_name] ~= false end
-      end
-      return true
-    end,
-  }
-end
 
 --- @alias blink.lib.ConfigSchemaLiteralType 'string' | 'number' | 'boolean' | 'function' | 'table' | 'nil' | 'any'
 --- @alias blink.lib.ConfigSchemaType blink.lib.ConfigSchemaLiteralType | blink.lib.ConfigSchemaValidator | (blink.lib.ConfigSchemaLiteralType | blink.lib.ConfigSchemaValidator)[]
@@ -100,6 +50,7 @@ local special_modes = {
 
 --- @class blink.lib.Config<T>: T
 --- @param __blink_lib_config true
+--- @param snapshot fun(): T
 --- @overload fun(config: T, opts?: blink.lib.config.MergeOpts): blink.lib.Config<T>
 
 --- @class blink.lib.config.Opts
@@ -131,28 +82,46 @@ function M.new(schema, opts)
     for key, field in pairs(inner_schema) do
       local nested_path = vim.list_extend({}, path)
       table.insert(nested_path, key)
-      if field[2] == nil then metatables[key] = get_metatable(inner_schema[key], nested_path) end
+      if key ~= CATCHALL and field[2] == nil then metatables[key] = get_metatable(inner_schema[key], nested_path) end
     end
 
     return setmetatable({}, {
       __index = function(_, key)
+        if key == 'snapshot' then
+          if #path > 0 then error('Cannot call snapshot on a nested config schema') end
+          return function()
+            local result = config
+            if global_key and vim.g[global_key] then result = vim.tbl_extend('force', result, vim.g[global_key]) end
+            if per_mode[mode] then result = vim.tbl_extend('force', result, per_mode[mode]) end
+            if mode:sub(1, 1) ~= 'c' then
+              if per_bufnr[bufnr] then result = vim.tbl_extend('force', result, per_bufnr[bufnr]) end
+              if global_key and vim.b[global_key] then result = vim.tbl_extend('force', result, vim.g[global_key]) end
+            end
+            return result
+          end
+        end
+
         if key == '__blink_lib_config' then return true end
         if metatables[key] ~= nil then return metatables[key] end
 
         if mode:sub(1, 1) ~= 'c' then
-          if global_key then
+          if global_key and vim.b[global_key] then
             local buffer_local_value = M.utils.tbl_get(vim.b[global_key], path, key)
             if buffer_local_value ~= nil then return buffer_local_value end
           end
 
-          local buffer_value = M.utils.tbl_get(per_bufnr[bufnr], path, key)
-          if buffer_value ~= nil then return buffer_value end
+          if per_bufnr[bufnr] then
+            local buffer_value = M.utils.tbl_get(per_bufnr[bufnr], path, key)
+            if buffer_value ~= nil then return buffer_value end
+          end
         end
 
-        local mode_value = M.utils.tbl_get(per_mode[mode], path, key)
-        if mode_value ~= nil then return mode_value end
+        if per_mode[mode] then
+          local mode_value = M.utils.tbl_get(per_mode[mode], path, key)
+          if mode_value ~= nil then return mode_value end
+        end
 
-        if global_key then
+        if global_key and vim.g[global_key] then
           local global_value = M.utils.tbl_get(vim.g[global_key], path, key)
           if global_value ~= nil then return global_value end
         end
@@ -195,14 +164,53 @@ end
 --- @param parent_path string? For internal use only
 function M.validate(schema, tbl, parent_path)
   parent_path = parent_path or ''
+  local catchall = schema[CATCHALL]
 
   for key in next, tbl do
-    if schema[key] == nil then error(parent_path .. tostring(key) .. ': unknown field') end
+    if schema[key] == nil then
+      -- handle catchall
+      if catchall then
+        local path = parent_path .. tostring(key)
+        local ok_k, err_k = M.utils.validate_value(key, catchall.key_type)
+        if not ok_k then
+          if err_k then
+            error(path .. '(key)' .. err_k)
+          else
+            error(
+              ('%s(key): expected %s, got %s'):format(
+                path,
+                M.utils.describe_type(catchall.key_type),
+                M.utils.describe_value(key)
+              )
+            )
+          end
+        end
+        local ok_v, err_v = M.utils.validate_value(tbl[key], catchall.value_type)
+        if not ok_v then
+          if err_v then
+            error(path .. err_v)
+          else
+            error(
+              ('%s: expected %s, got %s'):format(
+                path,
+                M.utils.describe_type(catchall.value_type),
+                M.utils.describe_value(tbl[key])
+              )
+            )
+          end
+        end
+      else
+        error(parent_path .. tostring(key) .. ': unknown field')
+      end
+    end
   end
 
   for key, field in pairs(schema) do
+    -- ignore catchall sentinel
+    if key == CATCHALL then
+
     -- nested schema
-    if field[2] == nil then
+    elseif field[2] == nil then
       local nested_tbl = tbl[key]
       if type(nested_tbl) ~= 'table' then
         local path = parent_path .. key
@@ -217,7 +225,7 @@ function M.validate(schema, tbl, parent_path)
       if not ok then
         local path = parent_path .. key
         if inner_err then
-          error(path .. ': ' .. inner_err)
+          error(path .. inner_err)
         else
           error(path .. ': expected ' .. M.utils.describe_type(t) .. ', got ' .. M.utils.describe_value(tbl[key]))
         end
@@ -280,7 +288,7 @@ end
 --- @return blink.lib.ConfigSchemaValidator
 function M.types.union(...)
   local types_list = { ... }
-  local desc = 'union(' .. table.concat(vim.tbl_map(M.utils.describe_type, types_list), ' | ') .. ')'
+  local desc = table.concat(vim.tbl_map(M.utils.describe_type, types_list), ' | ')
   return M.types.validator(desc, function(val)
     local deepest_err
     for _, t in ipairs(types_list) do
@@ -331,74 +339,66 @@ function M.types.map(key_type, value_type)
   )
 end
 
---- Validates that the value is a table with optional known fields (`struct`)
---- and arbitrary extra keys matching `key_type` -> `value_type`.
---- @param struct? blink.lib.ConfigSchema
---- @param key_type blink.lib.ConfigSchemaType
---- @param value_type blink.lib.ConfigSchemaType
---- @return blink.lib.ConfigSchemaValidator
-function M.types.table(struct, key_type, value_type)
-  local desc = 'table'
-  if struct then
-    local desc_fn = function(key) return key .. ': ' .. M.utils.describe_type(struct[key][2]) end
-    local fields = vim.tbl_map(desc_fn, vim.tbl_keys(struct))
-    desc = desc .. '{ ' .. table.concat(fields, ', ') .. ' }'
-  end
-  desc = desc .. ' & map(' .. M.utils.describe_type(key_type) .. ', ' .. M.utils.describe_type(value_type) .. ')'
+--- @class blink.lib.ConfigSchemaTable
+--- @field [string | number] blink.lib.ConfigSchemaType | blink.lib.ConfigSchemaTable
 
-  -- Recursively validate the struct's known keys (not extra keys)
-  local function validate_struct(schema, tbl, path)
-    for key, field in pairs(schema) do
-      local t, k = field[2], tbl[key]
-      local prefix_msg = path .. key .. ': '
-      if t == nil then
-        if type(k) ~= 'table' then error(prefix_msg .. 'expected nested table, got ' .. M.utils.describe_value(k)) end
-        validate_struct(field, k, prefix_msg .. '.')
-      else
-        local ok, err = M.utils.validate_value(k, t)
-        if not ok then
-          local msg = err or ('expected %s, got %s'):format(M.utils.describe_type(t), M.utils.describe_value(k))
-          error(prefix_msg .. msg)
-        end
-      end
+--- Validates that the value is a table matching the given shape.
+--- Unlike the main schema, values are type specs directly (no defaults).
+--- @param shape blink.lib.ConfigSchemaTable
+--- @return blink.lib.ConfigSchemaValidator
+function M.types.table(shape)
+  -- Normalize: wrap nested shapes as table validators
+  local fields = {}
+  for key, t in pairs(shape) do
+    if type(t) == 'table' and not M.types.is_validator(t) and not vim.islist(t) then
+      fields[key] = M.types.table(t)
+    else
+      fields[key] = t
     end
   end
+
+  local desc_parts = {}
+  for key, t in pairs(fields) do
+    table.insert(desc_parts, key .. ': ' .. M.utils.describe_type(t))
+  end
+  local desc = '{ ' .. table.concat(desc_parts, ', ') .. ' }'
 
   return M.types.validator(desc, function(val)
     if type(val) ~= 'table' then return false, 'expected table, got ' .. M.utils.describe_value(val) end
 
-    if struct then
-      local ok, err = pcall(validate_struct, struct, val, '')
-      if not ok then return false, 'table validation failed: ' .. err end
+    for key in pairs(val) do
+      if fields[key] == nil then return false, tostring(key) .. ': unknown field' end
     end
 
-    for k, v in pairs(val) do
-      if not struct or struct[k] == nil then
-        local ok_key, err_key = M.utils.validate_value(k, key_type)
-        if not ok_key then
-          return false,
-            err_key or ('[%s](key): expected %s, got %s'):format(
-              M.utils.describe_literal(k),
-              M.utils.describe_type(key_type),
-              M.utils.describe_value(k)
-            )
-        end
-
-        local ok_val, err_val = M.utils.validate_value(v, value_type)
-        if not ok_val then
-          return false,
-            err_val or ('[%s](value): expected %s, got %s'):format(
-              M.utils.describe_literal(k),
-              M.utils.describe_type(value_type),
-              M.utils.describe_value(v)
-            )
-        end
+    for key, t in pairs(fields) do
+      local ok, err = M.utils.validate_value(val[key], t)
+      if not ok then
+        if err then return false, tostring(key) .. '.' .. err end
+        return false,
+          tostring(key) .. ': expected ' .. M.utils.describe_type(t) .. ', got ' .. M.utils.describe_value(val[key])
       end
     end
 
     return true
   end)
 end
+
+--- Mark a schema as accepting additional keys of a given type
+--- @param struct blink.lib.ConfigSchema
+--- @param key_type blink.lib.ConfigSchemaType
+--- @param value_type blink.lib.ConfigSchemaType
+--- @return blink.lib.ConfigSchemaValidator
+function M.types.catchall(schema, key_type, value_type)
+  schema[CATCHALL] = { key_type = key_type, value_type = value_type }
+  return schema
+end
+
+M.types.keycode = M.types.validator('keycode', function(val)
+  if type(val) ~= 'string' or val == '' then return false end
+  local rest = val:gsub('<[^<>]+>', '')
+  if rest:match('[<>]') then return false end
+  return true
+end)
 
 -------------------
 --- UTILS
@@ -458,7 +458,9 @@ end
 function M.utils.extract_default(schema)
   local default = {}
   for key, field in pairs(schema) do
-    if field[2] ~= nil then
+    if key == CATCHALL then
+      -- skip
+    elseif field[2] ~= nil then
       default[key] = field[1]
     else
       default[key] = M.utils.extract_default(field)
