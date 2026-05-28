@@ -105,7 +105,75 @@ print(config.nested.setting) -- function (from config(..., { bufnr = 0 }))
 
 Most blink plugins use native libraries which are fetched from github releases when on a git tag (versioned release) or built on the user's device. This module provides utilities for resolving/downloading/building/loading libraries, fetching platform information and reading git commit/tags.
 
-For a production example, see [`blink.cmp's implementation`](https://github.com/saghen/blink.cmp/blob/main/lua/blink/cmp/init.lua).
+You may either use the `blink.lib.native.managed` module, an opinionated setup used in `blink.*` plugins, or the low level APIs directly (`blink.lib.native`).
+
+#### `blink.lib.native.managed`
+
+An example from [`blink.pairs`](https://github.com/saghen/blink.pairs):
+
+```lua
+local logger = require('blink.lib.log').new({ module = 'blink.pairs' })
+local native = require('blink.lib.native.managed').new({
+  module_name = 'blink.pairs',
+  library_name = 'blink_pairs_parser',
+  current_file_path = debug.getinfo(1, 'S').source:sub(2),
+  logger = logger,
+})
+
+local pairs = {}
+
+function pairs.setup()
+  if not pairs.library_available() then
+    return logger:notify(vim.log.levels.ERROR, {
+      { 'Please add ' },
+      { " build = function() require('blink.pairs').build():pwait(60000) end ", 'DiagnosticVirtualTextInfo' },
+      { ' OR ' },
+      { " build = function() require('blink.pairs').download():pwait(60000) end ", 'DiagnosticVirtualTextInfo' },
+      { ' to your lazy.nvim config. For vim.pack, simply call either function before calling setup().' },
+    })
+  end
+
+  -- plugin setup
+end
+
+function pairs.library_available() return native:library_available() end
+
+--- Builds the precompiled library if it's not already available
+--- @param opts? { force?: boolean, dev?: boolean }
+--- @return blink.lib.Task
+function pairs.build(opts)
+  return native:build(
+    { 'cargo', 'build', '--release' },
+    function(repo_root, platform)
+      return {
+        repo_root .. '/target/release/libblink_pairs_parser' .. platform.lib_extension,
+        repo_root .. '/target/release/blink_pairs_parser' .. platform.lib_extension,
+      }
+    end,
+    opts
+  )
+end
+
+--- Downloads the precompiled library if it's not already available
+--- @param opts? { force?: boolean, dev?: boolean }
+--- @return blink.lib.Task
+function pairs.download(opts)
+  return native:download(
+    function(git_tag, platform)
+      return 'https://github.com/saghen/blink.pairs/releases/download/'
+        .. git_tag
+        .. '/'
+        .. platform.triple
+        .. platform.lib_extension
+    end,
+    opts
+  )
+end
+```
+
+#### `blink.lib.native` low level APIs
+
+Must more control allows for building with just about any build system.
 
 ```lua
 local native = require('blink.lib.native')
@@ -139,7 +207,7 @@ end
 --- Downloads the precompiled library if it's not already available
 --- @param opts? { force?: boolean }
 --- @return blink.lib.Task
-function cmp.download(opts)
+function download(opts)
   local git_tag = native.git_tag(current_file)
   if git_tag == nil then error('Missing git tag, have you pinned the version?') end
 
