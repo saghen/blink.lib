@@ -28,7 +28,7 @@ end
 
 --- @param name string Name of the library to resolve (e.g. 'blink_cmp_fuzzy')
 --- @param commit_hash? string Commit hash of the library to resolve (e.g. 'e5678fe566e86553403b3129a3684389c84fafb5'). If omitted, `lib$name.so.hash` will be skipped, and only `lib$name.so` will be attempted.
---- @return string library_path
+--- @return string? library_path
 function native.resolve(name, commit_hash)
   -- $runtimepath/lib/lib*.so.hash
   local lib_paths = commit_hash ~= nil
