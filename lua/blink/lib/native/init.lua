@@ -92,14 +92,20 @@ function native.exec(cwd, cmd, logger, callback)
   logger:write_to_file('Working directory: ' .. cwd .. '\n')
   logger:write_to_file('Command: ' .. table.concat(cmd, ' ') .. '\n')
   logger:write_to_file('---\n')
+
+  local stderr = ''
   return vim.system(cmd, {
     cwd = cwd,
-    stdout = function(_, data) logger:write_to_file(data) end,
-    stderr = function(_, data) logger:write_to_file(data) end,
+    stdout = function(err, data) logger:write_to_file(err or data) end,
+    stderr = function(err, data)
+      if err == nil and data == nil then return end
+      stderr = stderr .. (err or data)
+      logger:write_to_file(err or data)
+    end,
   }, function(res)
     logger:write_to_file('---\n')
     if res.code ~= 0 then
-      callback('Failed with exit code ' .. res.code .. ': ' .. res.stderr)
+      callback('Failed with exit code ' .. res.code .. ': ' .. stderr)
     else
       callback(nil, res)
     end
