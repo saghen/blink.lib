@@ -209,10 +209,12 @@ end
 --- @return blink.lib.Task
 function download(opts)
   local git_tag = native.git_tag(current_file)
-  if git_tag == nil then error('Missing git tag, have you pinned the version?') end
+  if git_tag == nil then error("Missing git tag, have you pinned the version? Set `version = '*'` for lazy.nvim or `version = vim.version.range('*')` for vim.pack") end
 
   local platform = native.platform()
-  if platform.triple == nil then error('Unknown platform: ' .. platform.triple) end
+  if platform.triple == nil then
+    error(string.format('Unknown platform (os: %s, arch: %s)', platform.os, platform.arch))
+  end
 
   local url = 'https://github.com/ ' .. your_repo .. '/releases/download/'
     .. git_tag

@@ -57,7 +57,7 @@ function managed:build(command, get_artifact_paths, opts)
         if not native.resolve(self.library_name, native.git_commit(self.current_file_path)) then
           error('failed to load after building')
         end
-        logger:notify(vim.log.levels.INFO, 'Successfully loaded built ' .. self.module_name .. ' native library')
+        logger:notify(vim.log.levels.INFO, 'Successfully built ' .. self.module_name .. ' native library')
       end)
     end)
     :catch(function(build_err)
@@ -80,10 +80,16 @@ function managed:download(get_download_url, opts)
       logger:notify(vim.log.levels.INFO, 'Downloading ' .. self.module_name .. ' precompiled library')
 
       local git_tag = native.git_tag(self.current_file_path, opts.match)
-      if git_tag == nil then error('missing git tag, have you pinned the version?') end
+      if git_tag == nil then
+        error(
+          "Missing git tag, have you pinned the version? Set `version = '*'` for lazy.nvim or `version = vim.version.range('*')` for vim.pack"
+        )
+      end
 
       local platform = native.platform()
-      if platform.triple == nil then error('unknown platform (' .. platform.triple .. ')') end
+      if platform.triple == nil then
+        error(string.format('Unknown platform (os: %s, arch: %s)', platform.os, platform.arch))
+      end
 
       local git_commit = native.git_commit(current_file_path)
       local library_path = native.library_path(self.library_name, git_commit)
@@ -92,7 +98,7 @@ function managed:download(get_download_url, opts)
 
       return native.download_async(download_url, library_path):map(function()
         if not native.load(self.library_name, native.git_commit(current_file_path)) then
-          error('failed to load after downloading')
+          error('Failed to load after downloading')
         end
         logger:notify(vim.log.levels.INFO, 'Successfully downloaded ' .. self.module_name .. ' native library')
       end)
