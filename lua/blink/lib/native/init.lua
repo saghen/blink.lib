@@ -15,13 +15,13 @@ function native.platform()
   return { os = os, arch = arch, libc = libc, triple = triple, lib_extension = lib_extension }
 end
 
+--- @param repo_root string Root of the repository
 --- @param name string Name of the artifact to be used when requiring it (e.g. 'blink_cmp_fuzzy')
 --- @param commit_hash? string Commit hash of the repository. If omitted, resulting filename will be `lib$name.so` instead of `lib$name.so.hash`.
---- @param dir? string Override the default base path of `vim.fn.stdpath('data') .. '/site/lib/'`
 --- @return string library_path
-function native.library_path(name, commit_hash, dir)
-  dir = dir and vim.fs.normalize(dir) or (vim.fn.stdpath('data') .. '/site/lib')
-  local path = dir .. '/lib' .. name .. lib_extension
+function native.library_path(repo_root, name, commit_hash)
+  repo_root = vim.fs.normalize(repo_root)
+  local path = repo_root .. '/lib/lib' .. name .. lib_extension
   if commit_hash ~= nil then return path .. '.' .. commit_hash:sub(1, 7) end
   return path
 end
@@ -40,7 +40,12 @@ function native.resolve(name, commit_hash)
   end
 
   if #lib_paths > 1 then
-    error('Found multiple instances of the same library (' .. name .. '): ' .. table.concat(lib_paths, ', '))
+    error(
+      'Found multiple instances of the same library ('
+        .. name
+        .. '). Note that the latest update moved the binary from `site/lib/*` to `$repo/lib/*`. Please remove the former: '
+        .. table.concat(lib_paths, ', ')
+    )
   end
   return lib_paths[1]
 end
@@ -157,7 +162,7 @@ end
 
 --- @param path string Path to the repository root or some path inside the repository
 --- @return string commit_hash For example 'e5678fe566e86553403b3129a3684389c84fafb5'
-function native.git_commit(path)
+function native.git_commit(repo_root)
   --- @param p string
   --- @return string?
   function read_file(p)
@@ -168,12 +173,8 @@ function native.git_commit(path)
     return content
   end
 
-  -- Walk up from the module file to find the .git directory
-  local git_dir = vim.fs.find('.git', { upward = true, path = vim.fs.normalize(path), type = 'directory' })[1]
-  if not git_dir then error('Failed to find .git directory for path: ' .. path) end
-
   -- Read HEAD
-  local head_path = git_dir .. '/HEAD'
+  local head_path = repo_root .. '/.git/HEAD'
   local head_content = read_file(head_path)
   if not head_content then error('Failed to read ' .. head_path) end
   head_content = vim.trim(head_content)
@@ -183,17 +184,17 @@ function native.git_commit(path)
 
   -- HEAD contains a ref, e.g. "ref: refs/heads/main"
   local ref = head_content:match('^ref: (.+)$')
-  if not ref then error('Failed to parse HEAD: ' .. head_content) end
-
-  -- Try to read the loose ref file (e.g. .git/refs/heads/main)
-  local ref_path = git_dir .. '/' .. ref
-  local ref_content = read_file(ref_path)
-  if ref_content then return vim.trim(ref_content) end
+  if ref then
+    -- Try to read the loose ref file (e.g. .git/refs/heads/main)
+    local ref_path = repo_root .. '/.git/' .. ref
+    local ref_content = read_file(ref_path)
+    if ref_content then return vim.trim(ref_content) end
+  end
 
   -- Fallback to git CLI
-  local result = vim.system({ 'git', 'rev-parse', 'HEAD' }, { cwd = path }):wait(1000)
+  local result = vim.system({ 'git', 'rev-parse', 'HEAD' }, { cwd = repo_root }):wait(1000)
   if result.code ~= 0 or result.stdout == nil then error('Failed to get git commit: ' .. (result.stderr or '')) end
-  return result.stdout
+  return vim.trim(result.stdout)
 end
 
 --- Unlike `git_commit(path)`, this function will simply return `nil` if the git commit cannot be determined
@@ -204,17 +205,13 @@ function native.try_git_commit(path)
   if success then return commit_hash end
 end
 
---- @param path string Path to the repository root or some path inside the repository
+--- @param repo_root string Path to the repository root
 --- @param match? string Tag to check for existence (e.g. 'v1.*')
 --- @return string? tag For example 'v0.0.1'
-function native.git_tag(path, match)
-  -- Walk up from the module file to find the .git directory
-  local git_dir = vim.fs.find('.git', { upward = true, path = vim.fs.normalize(path), type = 'directory' })[1]
-  if not git_dir then error('Failed to find .git directory for path: ' .. path) end
-
+function native.git_tag(repo_root, match)
   local cmd = match and { 'git', 'describe', '--tags', '--match', match, '--abbrev=0' }
     or { 'git', 'describe', '--tags', '--exact-match' }
-  local process = vim.system(cmd, { cwd = git_dir }):wait(1000)
+  local process = vim.system(cmd, { cwd = repo_root }):wait(1000)
   if process.code == 0 and process.stdout then return process.stdout:match('(%w+)\n') end
 end
 
