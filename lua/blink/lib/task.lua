@@ -348,7 +348,7 @@ end
 --- @param timeout number Timeout in milliseconds
 --- @return T? result
 function task:wait(timeout)
-  vim.wait(timeout, function() return self.status ~= STATUS.RUNNING end)
+  vim.wait(timeout or vim._maxint, function() return self.status ~= STATUS.RUNNING end)
 
   if self.status == STATUS.COMPLETED then
     return self.result
