@@ -25,10 +25,7 @@ function managed.new(opts)
   }, { __index = managed })
 end
 
-function managed:library_available()
-  assert(self.git_commit ~= nil, 'Could not find git commit')
-  return native.resolve(self.library_name, self.git_commit) ~= nil
-end
+function managed:library_available() return native.resolve(self.library_name, self.git_commit) ~= nil end
 
 --- Builds the precompiled library if it's not already available
 --- @param command string[]
