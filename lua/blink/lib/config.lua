@@ -31,7 +31,7 @@ local mode = vim.api.nvim_get_mode().mode
 local bufnr = vim.api.nvim_get_current_buf()
 vim.api.nvim_create_autocmd('ModeChanged', {
   group = augroup,
-  callback = function() mode = vim.api.nvim_get_mode().mode end,
+  callback = function() mode = vim.fn.getcmdwintype() ~= '' and 'cmdwin' or vim.api.nvim_get_mode().mode end,
 })
 vim.api.nvim_create_autocmd('BufEnter', {
   group = augroup,
@@ -46,6 +46,7 @@ local special_modes = {
   replace = { 'R', 'Rc', 'Rx', 'Rv', 'Rvc', 'Rvx' },
   cmdline = { 'c', 'cv', 'ce', 'cr' },
   terminal = { 't' },
+  cmdwin = { 'cmdwin' },
 }
 
 --- @class blink.lib.Config<T>: T
