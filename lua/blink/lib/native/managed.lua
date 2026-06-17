@@ -37,12 +37,14 @@ function managed:build(command, get_artifact_paths, opts)
   return task
     .resolve()
     :map(function()
+      -- ensure repository is available for native.resolve()
+      assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
+      vim.opt.runtimepath:append(self.repo_root)
+
       opts = opts or {}
       if not opts.force and self:library_available() then return end
 
       logger:notify(vim.log.levels.INFO, 'Building ' .. self.module_name .. ' native library...')
-
-      assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
 
       return native.exec_async(self.repo_root, command, logger):map(function(_system)
         local artifact_paths = get_artifact_paths(self.repo_root, native.platform())
@@ -83,12 +85,14 @@ function managed:download(get_download_url, opts)
   local logger = self.logger
   return task
     .new(function(resolve, _reject)
+      -- ensure repository is available for native.resolve()
+      assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
+      vim.opt.runtimepath:append(self.repo_root)
+
       opts = opts or {}
       if not opts.force and self:library_available() then return resolve() end
 
       logger:notify(vim.log.levels.INFO, 'Downloading ' .. self.module_name .. ' precompiled library')
-
-      assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
 
       local git_tag = native.git_tag(self.repo_root, opts.match)
       assert(
