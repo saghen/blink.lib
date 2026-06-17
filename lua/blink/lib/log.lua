@@ -213,14 +213,18 @@ function logger:flush_write_queue()
   vim.uv.fs_write(self.fd, batch, nil, function(write_err)
     if write_err ~= nil and not self.failed then
       self.failed = true
-      vim.notify(
-        'Failed to write to log file at '
-          .. self.opts.file.path
-          .. ' for module '
-          .. self.opts.module
-          .. ': '
-          .. write_err,
-        vim.log.levels.ERROR
+      vim.schedule(
+        function()
+          vim.notify(
+            'Failed to write to log file at '
+              .. self.opts.file.path
+              .. ' for module '
+              .. self.opts.module
+              .. ': '
+              .. write_err,
+            vim.log.levels.ERROR
+          )
+        end
       )
       return
     end
@@ -237,6 +241,8 @@ local M = {}
 --- @param opts blink.lib.LoggerOptions
 --- @return blink.lib.Logger
 function M.new(opts)
+  local log_dir = vim.fn.stdpath('log') --[[@as string]]
+
   opts.console = opts.console or {}
   opts.console.enabled = opts.console.enabled == nil or opts.console.enabled
   opts.console.min_log_level = opts.console.min_log_level or vim.log.levels.INFO
@@ -244,7 +250,7 @@ function M.new(opts)
   opts.file = opts.file or {}
   opts.file.enabled = opts.file.enabled == nil or opts.file.enabled
   opts.file.min_log_level = opts.file.min_log_level or vim.log.levels.INFO
-  opts.file.path = opts.file.path or vim.fn.stdpath('log') .. '/' .. opts.module .. '.log'
+  opts.file.path = opts.file.path or log_dir .. '/' .. opts.module .. '.log'
 
   local self = setmetatable({
     opts = opts,
@@ -255,13 +261,30 @@ function M.new(opts)
     failed = false,
   }, { __index = logger })
 
+  -- the log dir may not exist (e.g. first install)
+  if vim.fn.isdirectory(log_dir) == 0 then
+    if vim.fn.mkdir(log_dir, 'p') == 0 then
+      vim.notify('Failed to create log directory: ' .. log_dir, vim.log.levels.ERROR)
+      return self
+    end
+  end
+
   -- open log file and write queued lines
   vim.uv.fs_open(opts.file.path or '', 'a', 438, function(open_err, _fd)
     if open_err or _fd == nil then
       self.failed = true
-      vim.notify(
-        'Failed to open log file at ' .. opts.file.path .. ' for module ' .. opts.module .. ': ' .. open_err,
-        vim.log.levels.ERROR
+      vim.schedule(
+        function()
+          vim.notify(
+            'Failed to open log file at '
+              .. opts.file.path
+              .. ' for module '
+              .. opts.module
+              .. ': '
+              .. (open_err or 'unknown error'),
+            vim.log.levels.ERROR
+          )
+        end
       )
       return
     end
