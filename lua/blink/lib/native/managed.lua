@@ -41,6 +41,10 @@ function managed:build(command, get_artifact_paths, opts)
       assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
       vim.opt.runtimepath:append(self.repo_root)
 
+      -- the commit may have changed since this module was loaded, so re-read it
+      local current_commit = native.try_git_commit(self.repo_root)
+      if current_commit ~= nil then self.git_commit = current_commit end
+
       opts = opts or {}
       if not opts.force and self:library_available() then return end
 
@@ -88,6 +92,10 @@ function managed:download(get_download_url, opts)
       -- ensure repository is available for native.resolve()
       assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
       vim.opt.runtimepath:append(self.repo_root)
+
+      -- the commit may have changed since the module was loaded, so re-read it
+      local current_commit = native.try_git_commit(self.repo_root)
+      if current_commit ~= nil then self.git_commit = current_commit end
 
       opts = opts or {}
       if not opts.force and self:library_available() then return resolve() end
