@@ -19,3 +19,5 @@ local function equal(a, b)
   end
   return a_count == b_count
 end
+
+return equal
