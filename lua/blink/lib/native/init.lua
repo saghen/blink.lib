@@ -166,8 +166,9 @@ function native.git_commit(repo_root)
   --- @param p string
   --- @return string?
   function read_file(p)
-    local fd, err = vim.uv.fs_open(p, 'r', 438) -- 438 = 0666
-    if not fd then error(err) end
+    local fd = vim.uv.fs_open(p, 'r', 438) -- 438 = 0666
+    if not fd then return end
+
     local content = vim.uv.fs_read(fd, 1024, 0)
     vim.uv.fs_close(fd)
     return content
