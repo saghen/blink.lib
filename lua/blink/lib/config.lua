@@ -36,6 +36,19 @@ vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
   end,
 })
 
+-- Track the current buffer and mode via autocmds, so that `get()` works inside fast events
+-- where `nvim_get_current_buf()` and `nvim_get_mode()` are unavailable
+local current_bufnr = vim.api.nvim_get_current_buf()
+local current_mode = mode_to_category(vim.api.nvim_get_mode().mode)
+vim.api.nvim_create_autocmd('BufEnter', {
+  group = augroup,
+  callback = function(ev) current_bufnr = ev.buf end,
+})
+vim.api.nvim_create_autocmd('ModeChanged', {
+  group = augroup,
+  callback = function() current_mode = mode_to_category(vim.api.nvim_get_mode().mode) end,
+})
+
 --- @class blink.lib.config.Filter
 --- @field bufnr? integer Buffer to resolve the config for, `0` or `nil` for the current buffer. Ignored in cmdline mode
 --- @field mode? blink.lib.config.Mode Mode to resolve the config for, defaults to the current mode
@@ -88,12 +101,12 @@ function M.new(schema, opts)
 
   --- @param b? integer
   --- @return integer
-  local function to_bufnr(b) return (b == nil or b == 0) and vim.api.nvim_get_current_buf() or b end
+  local function to_bufnr(b) return (b == nil or b == 0) and current_bufnr or b end
 
   --- @param filter? blink.lib.config.Filter
   --- @return table
   local function get(filter)
-    local m = mode_to_category(filter and filter.mode or vim.api.nvim_get_mode().mode)
+    local m = filter and filter.mode and mode_to_category(filter.mode) or current_mode
 
     -- per mode resolution
     local resolved = cache[m]
