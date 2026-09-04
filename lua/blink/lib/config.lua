@@ -1,18 +1,3 @@
---- @class blink.lib.Filter
---- @field bufnr? number
-
---- @class blink.lib.Enable
---- @field enable fun(enable: boolean, filter?: blink.lib.Filter) Enables or disables the module, optionally scoped to a buffer
---- @field is_enabled fun(filter?: blink.lib.Filter): boolean Returns whether the module is enabled, optionally scoped to a buffer
-
---- @class blink.lib.EnableOpts
---- @field alternate_module_names? string[]
---- @field blocked_buftypes? string[]
---- @field blocked_filetypes? string[]
---- @field callback? fun(enable: boolean, filter?: blink.lib.Filter) Note that `filter.bufnr = 0` will be replaced with the current buffer
-
-local CATCHALL = {} -- sentinel for `types.catchall()`
-
 --- @class blink.lib.config
 local M = { types = {}, utils = {} }
 
@@ -25,139 +10,159 @@ local M = { types = {}, utils = {} }
 
 --- @alias blink.lib.ConfigSchema { [string]: blink.lib.ConfigSchema | blink.lib.ConfigSchemaField }
 
--- cache mode and bufnr for slightly faster access
-local augroup = vim.api.nvim_create_augroup('blink.lib.config', {})
-local mode = vim.api.nvim_get_mode().mode
-local bufnr = vim.api.nvim_get_current_buf()
-vim.api.nvim_create_autocmd('ModeChanged', {
-  group = augroup,
-  callback = function() mode = vim.fn.getcmdwintype() ~= '' and 'cmdwin' or vim.api.nvim_get_mode().mode end,
-})
-vim.api.nvim_create_autocmd('BufEnter', {
-  group = augroup,
-  callback = function() bufnr = vim.api.nvim_get_current_buf() end,
-})
-
-local special_modes = {
-  normal = { 'n', 'no', 'nov', 'noV', 'niI', 'niR', 'niV', 'nt', 'ntT' },
-  visual = { 'v', 'V', '\x16', 'vs', 'Vs', '\x16s' },
-  select = { 's', 'S', '\x13' },
-  insert = { 'i', 'ic', 'ix' },
-  replace = { 'R', 'Rc', 'Rx', 'Rv', 'Rvc', 'Rvx' },
-  cmdline = { 'c', 'cv', 'ce', 'cr' },
-  terminal = { 't' },
-  cmdwin = { 'cmdwin' },
-}
-
---- @class blink.lib.Config<T>: T
---- @param __blink_lib_config true
---- @param snapshot fun(): T
---- @overload fun(config: T, opts?: blink.lib.config.MergeOpts): blink.lib.Config<T>
-
---- @class blink.lib.config.Opts
---- @field global_key? string Key used for getting configs from `vim.g` and `vim.b`
---- @field validate? boolean Validate default configuration, defaults to true
-
---- @class blink.lib.config.MergeOpts
---- @field validate? boolean Validate after merging configs, defaults to true
---- @field bufnr? number Apply config to a given buffer
---- @field mode? blink.lib.config.Mode Apply config to a given mode
-
 --- @alias blink.lib.config.Mode 'normal' | 'visual' | 'select' | 'insert' | 'replace' | 'cmdline' | 'terminal' | string
 
---- @generic T
---- @param global_key string Key used for getting configs from `vim.g` and `vim.b`
---- @param schema blink.lib.ConfigSchema
---- @param opts? { global_key?: string, validate?: boolean } Validate default configuration, defaults to true
---- @return blink.lib.Config<T>
-function M.new(schema, opts)
-  local config = M.utils.extract_default(schema)
-  local global_key = opts and opts.global_key
-  local per_mode = {}
-  local per_bufnr = {}
-  if not opts or opts.validate ~= false then M.validate(schema, config) end
+-- stylua: ignore
+local mode_prefixes = {
+  n = 'normal', v = 'visual', V = 'visual', ['\x16'] = 'visual', s = 'select', S = 'select', ['\x13'] = 'select',
+  i = 'insert', R = 'replace', r = 'replace', c = 'cmdline', t = 'terminal'
+}
 
-  --- @param path string[]
-  local function get_metatable(inner_schema, path)
-    local metatables = {}
-    for key, field in pairs(inner_schema) do
-      local nested_path = vim.list_extend({}, path)
-      table.insert(nested_path, key)
-      if key ~= CATCHALL and field[2] == nil then metatables[key] = get_metatable(inner_schema[key], nested_path) end
+--- @param m string Raw mode from `nvim_get_mode()` or a category
+--- @return blink.lib.config.Mode
+local function mode_to_category(m) return mode_prefixes[m:sub(1, 1)] or m end
+
+--- Weak references to config instances to drop per-buffer scopes when a buffer is deleted
+--- @type table<blink.lib.Config, fun(bufnr: integer)>
+local instances = setmetatable({}, { __mode = 'k' })
+
+local augroup = vim.api.nvim_create_augroup('blink.lib.config', {})
+vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
+  group = augroup,
+  callback = function(ev)
+    for _, forget in pairs(instances) do
+      forget(ev.buf)
     end
+  end,
+})
 
-    return setmetatable({}, {
-      __index = function(_, key)
-        if key == 'snapshot' then
-          if #path > 0 then error('Cannot call snapshot on a nested config schema') end
-          return function()
-            local result = config
-            if global_key and vim.g[global_key] then result = vim.tbl_extend('force', result, vim.g[global_key]) end
-            if per_mode[mode] then result = vim.tbl_extend('force', result, per_mode[mode]) end
-            if mode:sub(1, 1) ~= 'c' then
-              if per_bufnr[bufnr] then result = vim.tbl_extend('force', result, per_bufnr[bufnr]) end
-              if global_key and vim.b[global_key] then result = vim.tbl_extend('force', result, vim.g[global_key]) end
-            end
-            return result
-          end
-        end
+--- @class blink.lib.config.Filter
+--- @field bufnr? integer Buffer to resolve the config for, `0` or `nil` for the current buffer. Ignored in cmdline mode
+--- @field mode? blink.lib.config.Mode Mode to resolve the config for, defaults to the current mode
 
-        if key == '__blink_lib_config' then return true end
-        if metatables[key] ~= nil then return metatables[key] end
+--- @class blink.lib.config.SetOpts
+--- @field validate? boolean Validate after merging, defaults to true
+--- @field bufnr? integer Apply config to a given buffer, `0` for the current buffer
+--- @field mode? blink.lib.config.Mode Apply config to a given mode
 
-        if mode:sub(1, 1) ~= 'c' then
-          if global_key and vim.b[global_key] then
-            local buffer_local_value = M.utils.tbl_get(vim.b[global_key], path, key)
-            if buffer_local_value ~= nil then return buffer_local_value end
-          end
+--- @class blink.lib.config.Opts
+--- @field validate? boolean Validate default configuration, defaults to true
 
-          if per_bufnr[bufnr] then
-            local buffer_value = M.utils.tbl_get(per_bufnr[bufnr], path, key)
-            if buffer_value ~= nil then return buffer_value end
-          end
-        end
+--- Configuration object with validation and per-buffer, per-mode, and global values
+---
+--- Accessing a top-level key (`config.completion`) returns the field from the resolved config
+--- for the current buffer and mode, which is a plain table. Re-read the field or call
+--- `config.get()` at each use, to ensure the table is up-to-date.
+---
+--- Resolution order, highest priority first:
+--- - per-buffer (`set(tbl, { bufnr })`), ignored in cmdline mode
+--- - per-mode (`set(tbl, { mode })`)
+--- - global (`set(tbl)`)
+--- - defaults
+---
+--- @class blink.lib.Config
+--- @field get fun(filter?: blink.lib.config.Filter): table Resolved configuration. Do not mutate.
+--- @field set fun(tbl: table, opts?: blink.lib.config.SetOpts): blink.lib.Config Validates and deep-merges into the global, per-mode or per-buffer scope
+--- @field validate fun(tbl: table) Validates a partial table against the schema, merged over the current global config
+--- @field schema blink.lib.ConfigSchema
+--- @field __blink_lib_config true
+--- @overload fun(tbl: table, opts?: blink.lib.config.SetOpts): blink.lib.Config Alias for `set`
 
-        if per_mode[mode] then
-          local mode_value = M.utils.tbl_get(per_mode[mode], path, key)
-          if mode_value ~= nil then return mode_value end
-        end
+--- @param schema blink.lib.ConfigSchema
+--- @param opts? blink.lib.config.Opts
+--- @return blink.lib.Config
+function M.new(schema, opts)
+  opts = opts or {}
 
-        if global_key and vim.g[global_key] then
-          local global_value = M.utils.tbl_get(vim.g[global_key], path, key)
-          if global_value ~= nil then return global_value end
-        end
+  local global = M.utils.extract_default(schema)
+  if opts.validate ~= false then M.validate(schema, global) end
 
-        return M.utils.tbl_get(config, path, key)
-      end,
+  local per_mode = {} --- @type table<string, table>
+  local per_bufnr = {} --- @type table<integer, table>
+  local cache = {} --- @type table<string, table> Resolved per mode
+  local cache_by_bufnr = {} --- @type table<integer, table<string, table>> Resolved per (buffer, mode), only for buffers with a scope
 
-      -- Merge with existing config
-      __call = function(_, tbl, opts)
-        if #path > 0 then error('Cannot call a nested config schema') end
+  --- @type blink.lib.Config
+  --- @diagnostic disable-next-line: missing-fields
+  local self = { schema = schema, __blink_lib_config = true }
 
-        opts = opts or {}
-        if opts.bufnr ~= nil and opts.mode ~= nil then error('Cannot specify both `bufnr` and `mode` options') end
+  --- @param b? integer
+  --- @return integer
+  local function to_bufnr(b) return (b == nil or b == 0) and vim.api.nvim_get_current_buf() or b end
 
-        tbl = tbl or {}
-        if opts.validate ~= false then M.validate(schema, vim.tbl_deep_extend('force', config, tbl)) end
+  --- @param filter? blink.lib.config.Filter
+  --- @return table
+  local function get(filter)
+    local m = mode_to_category(filter and filter.mode or vim.api.nvim_get_mode().mode)
 
-        -- per mode
-        if opts.mode ~= nil then
-          local modes = special_modes[opts.mode] or { opts.mode }
-          for _, mode in ipairs(modes) do
-            per_mode[mode] = vim.tbl_deep_extend('force', per_mode[mode] or {}, tbl)
-          end
-        -- per buffer
-        elseif opts.bufnr ~= nil then
-          per_bufnr[opts.bufnr] = vim.tbl_deep_extend('force', per_bufnr[opts.bufnr] or {}, tbl)
-        -- global
-        else
-          config = vim.tbl_deep_extend('force', config, tbl)
-        end
-      end,
-    })
+    -- per mode resolution
+    local resolved = cache[m]
+    if resolved == nil then
+      resolved = per_mode[m] and vim.tbl_deep_extend('force', global, per_mode[m]) or global
+      cache[m] = resolved
+    end
+    if m == 'cmdline' then return resolved end
+
+    -- per buffer resolution
+    local b = to_bufnr(filter and filter.bufnr)
+    local layer = per_bufnr[b]
+    if layer == nil then return resolved end
+
+    local by_mode = cache_by_bufnr[b]
+    if by_mode == nil then
+      by_mode = {}
+      cache_by_bufnr[b] = by_mode
+    end
+    local resolved_for_bufnr = by_mode[m]
+    if resolved_for_bufnr == nil then
+      resolved_for_bufnr = vim.tbl_deep_extend('force', resolved, layer)
+      by_mode[m] = resolved_for_bufnr
+    end
+    return resolved_for_bufnr
+  end
+  self.get = get
+
+  instances[self] = function(b)
+    if per_bufnr[b] == nil then return end
+    per_bufnr[b], cache_by_bufnr[b] = nil, nil
   end
 
-  return get_metatable(schema, {})
+  function self.validate(tbl) M.validate(schema, vim.tbl_deep_extend('force', global, tbl)) end
+
+  function self.set(tbl, set_opts)
+    set_opts = set_opts or {}
+    if set_opts.bufnr ~= nil and set_opts.mode ~= nil then error('Cannot specify both `bufnr` and `mode` options') end
+
+    tbl = tbl or {}
+    if set_opts.validate ~= false then self.validate(tbl) end
+
+    -- per mode
+    if set_opts.mode ~= nil then
+      local m = mode_to_category(set_opts.mode)
+      per_mode[m] = vim.tbl_deep_extend('force', per_mode[m] or {}, tbl)
+    -- per buffer
+    elseif set_opts.bufnr ~= nil then
+      local b = to_bufnr(set_opts.bufnr)
+      per_bufnr[b] = vim.tbl_deep_extend('force', per_bufnr[b] or {}, tbl)
+    -- global
+    else
+      global = vim.tbl_deep_extend('force', global, tbl)
+    end
+
+    cache, cache_by_bufnr = {}, {}
+    return self
+  end
+
+  for key in pairs(schema) do
+    if rawget(self, key) ~= nil then
+      error('"' .. tostring(key) .. '" is a reserved key and cannot be used in a schema')
+    end
+  end
+
+  return setmetatable(self, {
+    __index = function(_, key) return get()[key] end,
+    __call = function(s, tbl, set_opts) return s.set(tbl, set_opts) end,
+  })
 end
 
 --- @param schema blink.lib.ConfigSchema
@@ -165,53 +170,14 @@ end
 --- @param parent_path string? For internal use only
 function M.validate(schema, tbl, parent_path)
   parent_path = parent_path or ''
-  local catchall = schema[CATCHALL]
 
   for key in next, tbl do
-    if schema[key] == nil then
-      -- handle catchall
-      if catchall then
-        local path = parent_path .. tostring(key)
-        local ok_k, err_k = M.utils.validate_value(key, catchall.key_type)
-        if not ok_k then
-          if err_k then
-            error(path .. '(key)' .. err_k)
-          else
-            error(
-              ('%s(key): expected %s, got %s'):format(
-                path,
-                M.utils.describe_type(catchall.key_type),
-                M.utils.describe_value(key)
-              )
-            )
-          end
-        end
-        local ok_v, err_v = M.utils.validate_value(tbl[key], catchall.value_type)
-        if not ok_v then
-          if err_v then
-            error(path .. err_v)
-          else
-            error(
-              ('%s: expected %s, got %s'):format(
-                path,
-                M.utils.describe_type(catchall.value_type),
-                M.utils.describe_value(tbl[key])
-              )
-            )
-          end
-        end
-      else
-        error(parent_path .. tostring(key) .. ': unknown field')
-      end
-    end
+    if schema[key] == nil then error(parent_path .. tostring(key) .. ': unknown field') end
   end
 
   for key, field in pairs(schema) do
-    -- ignore catchall sentinel
-    if key == CATCHALL then
-
     -- nested schema
-    elseif field[2] == nil then
+    if field[2] == nil then
       local nested_tbl = tbl[key]
       if type(nested_tbl) ~= 'table' then
         local path = parent_path .. key
@@ -240,16 +206,17 @@ end
 -------------------
 
 --- @class blink.lib.ConfigSchemaValidator
-local Validator = {}
-Validator.__index = Validator
+--- @field desc string
+--- @field validator fun(val): boolean, string?
 
 --- @param desc string
 --- @param validator fun(val): boolean, string?
 --- @return blink.lib.ConfigSchemaValidator
-function M.types.validator(desc, validator) return setmetatable({ desc = desc, validator = validator }, Validator) end
+function M.types.validator(desc, validator) return { desc = desc, validator = validator } end
 
+--- @param v any
 --- @return boolean
-function M.types.is_validator(v) return getmetatable(v) == Validator end
+function M.types.is_validator(v) return type(v) == 'table' and type(v.validator) == 'function' end
 
 --- Validates that the value is one of the given variants
 --- @param variants (string | number | boolean)[]
@@ -281,23 +248,6 @@ function M.types.list(inner_type)
       end
     end
     return true
-  end)
-end
-
---- Accepts any value that matches at least one of the given types.
---- @vararg blink.lib.ConfigSchemaType
---- @return blink.lib.ConfigSchemaValidator
-function M.types.union(...)
-  local types_list = { ... }
-  local desc = table.concat(vim.tbl_map(M.utils.describe_type, types_list), ' | ')
-  return M.types.validator(desc, function(val)
-    local deepest_err
-    for _, t in ipairs(types_list) do
-      local ok, err = M.utils.validate_value(val, t)
-      if ok then return true end
-      if err then deepest_err = err end
-    end
-    return false, deepest_err
   end)
 end
 
@@ -345,9 +295,17 @@ end
 
 --- Validates that the value is a table matching the given shape.
 --- Unlike the main schema, values are type specs directly (no defaults).
+--- Keys not in the shape are rejected, unless `extra_key_type` and `extra_value_type` are given,
+--- in which case they're validated against those instead.
 --- @param shape blink.lib.ConfigSchemaTable
+--- @param extra_key_type? blink.lib.ConfigSchemaType
+--- @param extra_value_type? blink.lib.ConfigSchemaType
 --- @return blink.lib.ConfigSchemaValidator
-function M.types.table(shape)
+function M.types.table(shape, extra_key_type, extra_value_type)
+  if (extra_key_type == nil) ~= (extra_value_type == nil) then
+    error('blink.lib.config: types.table requires both `extra_key_type` and `extra_value_type`, or neither')
+  end
+
   -- Normalize: wrap nested shapes as table validators
   local fields = {}
   for key, t in pairs(shape) do
@@ -362,36 +320,45 @@ function M.types.table(shape)
   for key, t in pairs(fields) do
     table.insert(desc_parts, key .. ': ' .. M.utils.describe_type(t))
   end
+  if extra_key_type then
+    table.insert(
+      desc_parts,
+      '[' .. M.utils.describe_type(extra_key_type) .. ']: ' .. M.utils.describe_type(extra_value_type)
+    )
+  end
   local desc = '{ ' .. table.concat(desc_parts, ', ') .. ' }'
+
+  --- @param label string Prefix for the error message, e.g. the key
+  --- @param t blink.lib.ConfigSchemaType
+  --- @param val any
+  --- @return boolean, string?
+  local function check(label, t, val)
+    local ok, err = M.utils.validate_value(val, t)
+    if ok then return true end
+    if err then return false, label .. '.' .. err end
+    return false, label .. ': expected ' .. M.utils.describe_type(t) .. ', got ' .. M.utils.describe_value(val)
+  end
 
   return M.types.validator(desc, function(val)
     if type(val) ~= 'table' then return false, 'expected table, got ' .. M.utils.describe_value(val) end
 
-    for key in pairs(val) do
-      if fields[key] == nil then return false, tostring(key) .. ': unknown field' end
+    for key, v in pairs(val) do
+      if fields[key] == nil then
+        if extra_key_type == nil then return false, tostring(key) .. ': unknown field' end
+        local ok, err = check(tostring(key) .. '(key)', extra_key_type, key)
+        if not ok then return false, err end
+        ok, err = check(tostring(key), extra_value_type, v)
+        if not ok then return false, err end
+      end
     end
 
     for key, t in pairs(fields) do
-      local ok, err = M.utils.validate_value(val[key], t)
-      if not ok then
-        if err then return false, tostring(key) .. '.' .. err end
-        return false,
-          tostring(key) .. ': expected ' .. M.utils.describe_type(t) .. ', got ' .. M.utils.describe_value(val[key])
-      end
+      local ok, err = check(tostring(key), t, val[key])
+      if not ok then return false, err end
     end
 
     return true
   end)
-end
-
---- Mark a schema as accepting additional keys of a given type
---- @param struct blink.lib.ConfigSchema
---- @param key_type blink.lib.ConfigSchemaType
---- @param value_type blink.lib.ConfigSchemaType
---- @return blink.lib.ConfigSchemaValidator
-function M.types.catchall(schema, key_type, value_type)
-  schema[CATCHALL] = { key_type = key_type, value_type = value_type }
-  return schema
 end
 
 M.types.keycode = M.types.validator('keycode', function(val)
@@ -435,22 +402,26 @@ end
 --- @param t blink.lib.ConfigSchemaType
 --- @return boolean, string?
 function M.utils.validate_value(val, t)
+  -- single type
   if M.types.is_validator(t) then
     local ok, err = t.validator(val)
     return ok, err
   end
 
+  -- union of multiple types
+  local last_err
   if type(t) ~= 'table' then t = { t } end
   for _, t in ipairs(t) do
     if M.types.is_validator(t) then
       local ok, err = t.validator(val)
       if ok then return true, nil end
+      last_err = err or last_err
     elseif type(val) == t then
       return true, nil
     end
   end
 
-  return false, nil
+  return false, last_err
 end
 
 --- Extracts the default values from a schema
@@ -459,24 +430,13 @@ end
 function M.utils.extract_default(schema)
   local default = {}
   for key, field in pairs(schema) do
-    if key == CATCHALL then
-      -- skip
-    elseif field[2] ~= nil then
+    if field[2] ~= nil then
       default[key] = field[1]
     else
       default[key] = M.utils.extract_default(field)
     end
   end
   return default
-end
-
-function M.utils.tbl_get(tbl, path, key)
-  for _, key in ipairs(path) do
-    if type(tbl) ~= 'table' then return end
-    tbl = tbl[key]
-  end
-  if type(tbl) ~= 'table' then return end
-  return tbl[key]
 end
 
 return M
