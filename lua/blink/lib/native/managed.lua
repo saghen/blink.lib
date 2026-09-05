@@ -4,6 +4,11 @@ local native = require('blink.lib.native')
 local task = require('blink.lib.task')
 
 --- @class blink.lib.native.managed
+--- @field module_name string
+--- @field library_name string
+--- @field logger blink.lib.Logger
+--- @field repo_root string
+--- @field git_commit string?
 local managed = {}
 
 --- @class blink.lib.native.managed.Opts
@@ -31,7 +36,7 @@ function managed:library_available() return native.resolve(self.library_name, se
 --- @param command string[]
 --- @param get_artifact_paths fun(repo_root: string, platform: blink.lib.native.Platform): string[] Returns a list of all possible artifact paths, ordered by preference
 --- @param opts? { force?: boolean, dev?: boolean }
---- @return blink.lib.Task
+--- @return blink.lib.Task<nil>
 function managed:build(command, get_artifact_paths, opts)
   local logger = self.logger
   return task
@@ -78,13 +83,13 @@ function managed:build(command, get_artifact_paths, opts)
     :catch(function(build_err)
       logger:notify(vim.log.levels.ERROR, 'Failed to build ' .. self.module_name .. ' native library: ' .. build_err)
       error(build_err)
-    end)
+    end) --[[@as blink.lib.Task<nil>]]
 end
 
 --- Downloads the precompiled library if it's not already available
 --- @param get_download_url fun(git_tag: string, platform: blink.lib.native.Platform): string
 --- @param opts? { force?: boolean, match?: string }
---- @return blink.lib.Task
+--- @return blink.lib.Task<nil>
 function managed:download(get_download_url, opts)
   local logger = self.logger
   return task
@@ -129,7 +134,7 @@ function managed:download(get_download_url, opts)
         'Failed to download ' .. self.module_name .. ' native library: ' .. download_err
       )
       error(download_err)
-    end)
+    end) --[[@as blink.lib.Task<nil>]]
 end
 
 return managed

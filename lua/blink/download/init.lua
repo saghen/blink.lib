@@ -2,7 +2,7 @@ local task = require('blink.lib.task')
 
 --- @class blink.lib.download.Opts
 --- @field download_url? fun(version: string, system_triple: string, extension: string): string
---- @field on_download fun()
+--- @field on_download? fun()
 --- @field root_dir string
 --- @field output_dir string
 --- @field binary_name string

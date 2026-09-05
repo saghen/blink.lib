@@ -39,8 +39,8 @@ end
 function M.parse_duration(d)
   if type(d) == 'number' then return d * 1e9 end
   local n, unit = d:match('^(%d+%.?%d*)(%a+)$')
-  assert(n, 'invalid duration: ' .. tostring(d))
   n = tonumber(n)
+  assert(n, 'invalid duration: ' .. tostring(d))
   if unit == 'ns' then return n end
   if unit == 'us' then return n * 1e3 end
   if unit == 'ms' then return n * 1e6 end

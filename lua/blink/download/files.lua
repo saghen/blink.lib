@@ -31,15 +31,15 @@ function M.new(root_dir, output_dir, binary_name)
   return self
 end
 
---- @return blink.lib.Task<{ version?: string; missing?: boolean }>
+--- @return blink.lib.Task<{ version?: string, missing: boolean }>
 function M:get_version()
   return fs.read(self.version_path, 1024)
     :map(function(version) return { version = version, missing = false } end)
-    :catch(function() return { missing = true } end)
+    :catch(function() return { missing = true } end) --[[@as blink.lib.Task<{ version?: string, missing: boolean }>]]
 end
 
 --- @param version string
---- @return blink.lib.Task
+--- @return blink.lib.Task<integer?>
 function M:set_version(version)
   return fs.mkdir(self.root_dir .. '/target')
     :map(function() return fs.mkdir(self.lib_folder) end)
@@ -49,8 +49,9 @@ end
 --- Get the extension for the library based on the current platform, including the dot (i.e. '.so' or '.dll')
 --- @return string
 function M.get_lib_extension()
-  if jit.os:lower() == 'mac' or jit.os:lower() == 'osx' then return '.dylib' end
-  if jit.os:lower() == 'windows' then return '.dll' end
+  local os = jit.os:lower()
+  if os == 'mac' or os == 'osx' then return '.dylib' end
+  if os == 'windows' then return '.dll' end
   return '.so'
 end
 

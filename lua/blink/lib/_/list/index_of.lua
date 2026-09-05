@@ -2,7 +2,7 @@
 --- @generic T
 --- @param list T[]
 --- @param val T
---- @return number?
+--- @return integer?
 local function index_of(list, val)
   for idx, v in ipairs(list) do
     if v == val then return idx end

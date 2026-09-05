@@ -22,7 +22,7 @@ local levels_to_str = {
 
 --- @class blink.lib.LoggerConsoleOptions
 --- @field enabled? boolean
---- @field min_log_level? number
+--- @field min_log_level? integer
 ---
 --- @class blink.lib.LoggerFileOptions : blink.lib.LoggerConsoleOptions
 --- @field path? string
@@ -46,7 +46,7 @@ function logger:open() vim.cmd('edit ' .. self.opts.file.path) end
 --- logger:log(vim.log.levels.INFO, 'message %s', { foo = true })
 --- ```
 ---
---- @param level number
+--- @param level integer
 --- @param msg string
 --- @param ... any
 function logger:log(level, msg, ...)
@@ -140,7 +140,7 @@ function logger:error(msg, ...) self:log(vim.log.levels.ERROR, msg, ...) end
 --- log:notify(vim.log.levels.INFO, { { 'chunk1-line1\nchunk1-line2\n' }, { 'chunk2-line1' } }, true, {})
 --- ```
 ---
---- @param level number Level from `vim.log.levels.*`
+--- @param level integer Level from `vim.log.levels.*`
 --- @param chunks string | [string, integer|string?][] List of `[text, hl_group]` pairs, where each is a `text` string highlighted by
 --- the (optional) name or ID `hl_group`.
 --- @param history boolean? if false, do not add to `message-history`.

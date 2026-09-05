@@ -28,6 +28,7 @@ end
 
 function M.std_dev(t, m)
   m = m or M.mean(t)
+  ---@type number
   local s = 0
   for i = 1, #t do
     local d = t[i] - m
@@ -72,6 +73,7 @@ function M.bootstrap_ci_slope(batch_sizes, batch_times, confidence, resamples)
 
   local slopes = {}
   for r = 1, resamples do
+    ---@type number, number
     local sxx, sxy = 0, 0
     for _ = 1, n do
       local i = math.random(n)
@@ -90,6 +92,7 @@ end
 --- Given batch sizes xs and batch times ys, returns per-op cost k.
 --- Using through-origin fit because a batch of 0 ops takes 0 time.
 function M.fit_slope(xs, ys)
+  ---@type number, number
   local sxx, sxy = 0, 0
   for i = 1, #xs do
     sxx = sxx + xs[i] * xs[i]
