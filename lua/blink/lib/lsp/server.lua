@@ -5,7 +5,7 @@
 ---   Async: call `ctx.respond(result, err)`, optionally returning a cancellation function
 ---
 --- @param opts blink.lib.lsp.server.Opts
---- @return fun(dispatchers: vim.lsp.rpc.Dispatchers): vim.lsp.rpc.PublicClient
+--- @return fun(dispatchers: vim.lsp.rpc.Dispatchers): vim.lsp.rpc.Client
 local function new(opts)
   local name = opts.name
   local handlers = opts.handlers or {}

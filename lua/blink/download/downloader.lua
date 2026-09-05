@@ -8,7 +8,7 @@ local downloader = {}
 --- @param files blink.lib.download.files
 --- @param get_download_url fun(version: string, system_triple: string, extension: string): string
 --- @param version string
---- @return blink.lib.Task
+--- @return blink.lib.Task<integer?>
 function downloader.download(files, get_download_url, version)
   -- set the version to 'v0.0.0' to avoid a failure causing the pre-built binary being marked as locally built
   return files
@@ -39,7 +39,7 @@ end
 --- @param files blink.lib.download.files
 --- @param url string
 --- @param filename string
---- @return blink.lib.Task
+--- @return blink.lib.Task<vim.SystemObj?>
 function downloader.download_file(files, url, filename)
   return task.new(function(resolve, reject)
     local args = { 'curl' }

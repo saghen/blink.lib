@@ -8,8 +8,8 @@ local uv = vim.uv
 --- Scans a directory asynchronously in chunks, returning an iterator function that yields
 --- each chunk of entries.
 --- @param path string
---- @param chunk_size? integer Number of entries to return per chunk
---- @return blink.lib.Task<function(): blink.lib.Task<blink.lib.fs.DirEntry[]?>>
+--- @param chunk_size? integer Entries to return per chunk
+--- @return blink.lib.Task<fun(): blink.lib.Task<blink.lib.fs.DirEntry[]?>>
 local function list_dir_iter(path, chunk_size)
   return task.new(function(resolve, reject)
     uv.fs_opendir(path, function(err, dir)

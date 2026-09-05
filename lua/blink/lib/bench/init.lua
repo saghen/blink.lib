@@ -49,7 +49,7 @@ function M.run_files(filter)
 end
 
 function M.run_file()
-  local file = vim.fs.relpath(vim.fn.getcwd(), vim.fn.expand('%:p'))
+  local file = vim.fs.relpath(vim.fn.getcwd(), vim.fn.expand('%:p') --[[@as string]])
   M.run_files(file)
 end
 
@@ -59,7 +59,7 @@ end
 
 --- @param group string | string[]
 --- @param default_opts? blink.lib.bench.RunOpts
---- @return blink.lib.bench.Group
+--- @return blink.lib.bench.RunOpts
 function M.group(group, default_opts)
   if type(group) == 'string' then group = { group } end
   return {
@@ -82,7 +82,7 @@ end
 --- @field group string[] Current group of benchmarks (default: {})
 --- @field warmup string Time to spend warming up before starting measurements (default: 500ms)
 --- @field measurement string Time to spend measuring (default: 5s)
---- @field min_samples integer Minimum number of samples to take (default: 10)
+--- @field min_samples integer Minimum of samples to take (default: 10)
 --- @field output boolean | 'verbose' Print output (default: true)
 --- @field save boolean Save output to file (default: true)
 

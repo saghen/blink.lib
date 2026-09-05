@@ -8,11 +8,11 @@ local native = {}
 --- @return blink.lib.native.Platform
 function native.platform()
   local platform = require('blink.lib.native.platform')
-  local os = platform.os()
+  local platform_os = platform.os()
   local arch = platform.arch()
-  local libc = platform.libc(os)
-  local triple = platform.triple(os, arch, libc)
-  return { os = os, arch = arch, libc = libc, triple = triple, lib_extension = lib_extension }
+  local libc = platform.libc(platform_os)
+  local triple = platform.triple(platform_os, arch, libc)
+  return { os = platform_os, arch = arch, libc = libc, triple = triple, lib_extension = lib_extension }
 end
 
 --- @param repo_root string Root of the repository
@@ -78,12 +78,12 @@ function native.download(url, path, callback)
     vim.uv.fs_unlink(new_path)
   end
 
-  vim.net.request(url, { outpath = path }, function(err) callback(err) end)
+  vim.net.request(url, { outpath = path }, function(err) callback(tostring(err)) end)
 end
 
 --- @param url string
 --- @param path string Where to save the library
---- @return blink.lib.Task
+--- @return blink.lib.Task<nil>
 function native.download_async(url, path)
   return require('blink.lib.task').wrap(function(callback) native.download(url, path, callback) end)
 end
@@ -91,7 +91,7 @@ end
 --- @param cwd string
 --- @param cmd string[]
 --- @param logger blink.lib.Logger
---- @param callback fun(err?: string, process: vim.SystemCompleted)
+--- @param callback fun(err?: string, process?: vim.SystemCompleted)
 function native.exec(cwd, cmd, logger, callback)
   logger:write_to_file('---\n')
   logger:write_to_file('Working directory: ' .. cwd .. '\n')
@@ -128,7 +128,7 @@ end
 --- Recursively creates a directory, no-op if the directory already exists
 --- @param path string
 function native.mkdirp(path)
-  local ok, err = vim.uv.fs_mkdir(path, 493)
+  local _, err = vim.uv.fs_mkdir(path, 493)
   if err then
     -- parent might not exist, try creating it first
     local parent = vim.fs.dirname(path)
@@ -160,7 +160,7 @@ function native.git_repo_root(path)
   return vim.fn.fnamemodify(git_dir, ':h')
 end
 
---- @param path string Path to the repository root or some path inside the repository
+--- @param repo_root string Path to the repository root or some path inside the repository
 --- @return string commit_hash For example 'e5678fe566e86553403b3129a3684389c84fafb5'
 function native.git_commit(repo_root)
   --- @param p string

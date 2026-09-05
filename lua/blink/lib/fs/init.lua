@@ -20,7 +20,7 @@ end
 
 --- Gets a list of all items in a directory asynchronously
 --- @param path string
---- @param max_entries? integer Maximum number of entries to return
+--- @param max_entries? integer Maximum of entries to return
 --- @return blink.lib.Task<blink.lib.fs.DirEntry[]>
 function fs.list_dir(path, max_entries)
   -- TODO: create a helper for working with iters in `blink.lib.task`?
@@ -49,9 +49,9 @@ fs.list_dir_iter = require('blink.lib.fs.list_dir_iter')
 
 --- Equivalent to `preadv(2)`. Returns a string where an empty string indicates EOF
 --- @param path string
---- @param size number
---- @param offset number?
---- @return blink.lib.Task<string>
+--- @param size integer
+--- @param offset integer?
+--- @return blink.lib.Task<string?>
 function fs.read(path, size, offset)
   return task.new(function(resolve, reject)
     uv.fs_open(path, 'r', 438, function(open_err, fd)
@@ -68,8 +68,8 @@ end
 --- Equivalent to `pwritev(2)`. Returns the number of bytes written
 --- @param path string
 --- @param data string
---- @param offset number?
---- @return blink.lib.Task<number>
+--- @param offset integer?
+--- @return blink.lib.Task<integer?>
 function fs.write(path, data, offset)
   return task.new(function(resolve, reject)
     uv.fs_open(path, 'w', 438, function(open_err, fd)

@@ -29,13 +29,13 @@ local system = {
 }
 
 --- Gets the operating system and architecture of the current system
---- @return string, string
+--- @return string, "x64"|"arm"?
 function system.get_info()
   local os = jit.os:lower()
   if os == 'osx' then os = 'mac' end
 
   if os == 'bsd' then
-    local sysname = vim.loop.os_uname().sysname:lower()
+    local sysname = vim.uv.os_uname().sysname:lower()
     if sysname == 'freebsd' then
       os = 'freebsd'
     elseif sysname == 'openbsd' then
@@ -82,13 +82,13 @@ end
 
 --- Gets the system triple for the current system
 --- for example, `x86_64-unknown-linux-gnu` or `aarch64-apple-darwin`
---- @return blink.lib.Task
+--- @return blink.lib.Task<string?>
 function system.get_triple()
   return task.new(function(resolve, reject)
     if config.force_system_triple then return resolve(config.force_system_triple) end
 
     local os, arch = system.get_info()
-    local triples = system.triples[os]
+    local triples = assert(system.triples[os], 'OS ' .. os .. ' is not supported')
 
     if os == 'linux' then
       if vim.fn.has('android') == 1 then return resolve(triples.android) end

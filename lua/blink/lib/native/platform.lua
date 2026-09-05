@@ -47,7 +47,7 @@ function platform.os()
   local os = jit.os:lower()
   if os == 'osx' then os = 'mac' end
   if os == 'bsd' then
-    local sysname = vim.loop.os_uname().sysname:lower()
+    local sysname = vim.uv.os_uname().sysname:lower()
     if sysname == 'freebsd' or sysname == 'openbsd' or sysname == 'netbsd' then os = sysname end
   end
   return os
@@ -68,7 +68,7 @@ function platform.libc(os)
   local head = vim.uv.fs_read(fd, 4096, 0)
   vim.uv.fs_close(fd)
 
-  return head:match('musl') and 'musl' or 'gnu'
+  return head and head:match('musl') and 'musl' or 'gnu'
 end
 
 --- Gets the system triple for the current system

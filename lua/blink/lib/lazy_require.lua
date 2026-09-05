@@ -1,4 +1,5 @@
 local function lazy_require(module_name)
+  ---@type any
   local module
   return setmetatable({}, {
     __index = function(_, key)

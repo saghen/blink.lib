@@ -107,7 +107,6 @@ function task.wrap(fn)
   end)
 end
 
---- @param self blink.lib.Task<any>
 function task:cancel()
   if self.status ~= STATUS.RUNNING then return end
   self.status = STATUS.CANCELLED
@@ -127,7 +126,6 @@ end
 --- This only applies if the input task completed successfully.
 --- @generic T
 --- @generic U
---- @param self blink.lib.Task<`T`>
 --- @param fn fun(result: T): blink.lib.Task<`U`> | `U` | nil
 --- @return blink.lib.Task<U>
 function task:map(fn)
@@ -183,7 +181,6 @@ end
 --- events
 
 --- @generic T
---- @param self blink.lib.Task<T>
 --- @param cb fun(result: T)
 --- @return blink.lib.Task<T>
 function task:on_resolve(cb)
@@ -196,7 +193,6 @@ function task:on_resolve(cb)
 end
 
 --- @generic T
---- @param self blink.lib.Task<T>
 --- @param cb fun(err: any)
 --- @return blink.lib.Task<T>
 function task:on_reject(cb)
@@ -302,14 +298,12 @@ end
 
 --- Makes the task infallible, returning true if the task resolved successfully and false if the task rejected.
 --- @generic T
---- @param self blink.lib.Task<T>
 --- @return blink.lib.Task<boolean>
 function task:ok(fn)
   return self:map(function() return true end):catch(function() return false end)
 end
 
 --- @generic T
---- @param self blink.lib.Task<T>
 --- @return blink.lib.Task<T>
 function task:schedule()
   return self:map(function(value)
@@ -320,7 +314,6 @@ function task:schedule()
 end
 
 --- @generic T
---- @param self blink.lib.Task<T>
 --- @return blink.lib.Task<nil>
 function task:void()
   return self:map(function() end)
@@ -328,8 +321,7 @@ end
 
 --- Fails if the task doesn't complete within the given number of milliseconds.
 --- @generic T
---- @param self blink.lib.Task<T>
---- @param ms number
+--- @param ms integer
 --- @return blink.lib.Task<T>
 function task:timeout(ms)
   return task.new(function(resolve, reject)
@@ -344,8 +336,7 @@ end
 --- Blocks until the task completes, fails, or is cancelled.
 --- Must be called from the main thread (not from a fast callback).
 --- @generic T
---- @param self blink.lib.Task<T>
---- @param timeout number Timeout in milliseconds
+--- @param timeout integer Timeout in milliseconds
 --- @return T? result
 function task:wait(timeout)
   vim.wait(timeout or vim._maxint, function() return self.status ~= STATUS.RUNNING end)
