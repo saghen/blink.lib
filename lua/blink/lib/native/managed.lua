@@ -77,6 +77,14 @@ function managed:build(command, get_artifact_paths, opts)
 
         -- ensure the library loads
         assert(native.resolve(self.library_name, git_commit) ~= nil, 'Failed to load built library')
+        if opts.force and not opts.dev then
+          -- remove the fallback so future updates trigger a rebuild
+          local dev_path = native.library_path(self.repo_root, self.library_name)
+          local ok, err, code = vim.uv.fs_unlink(dev_path)
+          if not ok and code ~= 'ENOENT' then
+            logger:notify(vim.log.levels.WARN, 'Failed to delete dev artifact: ' .. tostring(err))
+          end
+        end
         logger:notify(vim.log.levels.INFO, 'Successfully built ' .. self.module_name .. ' native library')
       end)
     end)
