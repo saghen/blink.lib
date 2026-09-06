@@ -81,11 +81,14 @@ function native.download(url, path, callback)
   vim.net.request(url, { outpath = path }, function(err) callback(tostring(err)) end)
 end
 
+--- @async
 --- @param url string
 --- @param path string Where to save the library
---- @return blink.lib.Task<nil>
 function native.download_async(url, path)
-  return require('blink.lib.task').wrap(function(callback) native.download(url, path, callback) end)
+  local async = require('blink.lib.async')
+  local err = async.await(3, native.download, url, path)
+  async.await(vim.schedule)
+  if err ~= nil then error(err, 0) end
 end
 
 --- @param cwd string
@@ -117,12 +120,25 @@ function native.exec(cwd, cmd, logger, callback)
   end)
 end
 
+--- @async
 --- @param cwd string
 --- @param cmd string[]
 --- @param logger blink.lib.Logger
---- @return blink.lib.Task<vim.SystemCompleted>
+--- @return vim.SystemCompleted
 function native.exec_async(cwd, cmd, logger)
-  return require('blink.lib.task').wrap(function(callback) native.exec(cwd, cmd, logger, callback) end)
+  local async = require('blink.lib.async')
+  local err, process = async.await(function(callback)
+    local proc = native.exec(cwd, cmd, logger, callback)
+    return {
+      close = function(_, done)
+        pcall(proc.kill, proc, 'TERM')
+        if done then done() end
+      end,
+    }
+  end)
+  async.await(vim.schedule)
+  if err ~= nil then error(err, 0) end
+  return process
 end
 
 --- Recursively creates a directory, no-op if the directory already exists

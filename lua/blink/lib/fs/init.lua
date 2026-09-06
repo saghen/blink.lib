@@ -1,143 +1,129 @@
-local require = require('blink.lib.lazy_require')
-local task = require('blink.lib.task')
+local async = require('blink.lib.async')
 local uv = vim.uv
 
+--- @class blink.lib.fs.DirEntry
+--- @field name string
+--- @field type "file" | "directory" | "link" | "fifo" | "socket" | "char" | "block" | "unknown"
+
+--- Asynchronous filesystem helpers. All functions are `@async` and resume in a fast event,
+--- call `vim.async.await(vim.schedule)` before using editor APIs.
 --- @class blink.lib.fs
 local fs = {}
 
+--- @async
 --- @param path string
 --- @param flags string
 --- @param mode integer
---- @return blink.lib.Task<integer>
-function fs.open(path, flags, mode)
-  return task.new(function(resolve, reject)
-    uv.fs_open(path, flags, mode, function(err, fd)
-      if err or fd == nil then return reject(err or 'Unknown error while opening file') end
-      resolve(fd)
-    end)
-  end)
-end
+--- @return integer fd
+function fs.open(path, flags, mode) return async.await_err(4, uv.fs_open, path, flags, mode) end
 
---- Gets a list of all items in a directory asynchronously
+--- Gets a list of all items in a directory
+--- @async
 --- @param path string
---- @param max_entries? integer Maximum of entries to return
---- @return blink.lib.Task<blink.lib.fs.DirEntry[]>
+--- @param max_entries? integer Maximum number of entries to return, defaults to 200
+--- @return blink.lib.fs.DirEntry[]
 function fs.list_dir(path, max_entries)
-  -- TODO: create a helper for working with iters in `blink.lib.task`?
-  return fs.list_dir_iter(path, math.min(max_entries or 200, 200)):map(function(iter)
-    local function next(all_entries)
-      return iter():map(function(entries)
-        -- end of directory
-        if entries == nil then return all_entries end
+  max_entries = max_entries or 200
+  local dir = async.await_err(2, uv.fs_opendir, path, nil, math.min(max_entries, 200))
 
-        -- reached max entries
-        if #all_entries + #entries >= max_entries then
-          vim.list_extend(all_entries, vim.list_slice(entries, 1, max_entries - #all_entries))
-          return all_entries
-        end
-
-        -- continue iter
-        vim.list_extend(all_entries, entries)
-        return next(all_entries)
-      end)
+  local entries = {}
+  local ok, err = async.pawait(async.run('blink.lib.fs.list_dir', function()
+    while #entries < max_entries do
+      local chunk = async.await_err(2, uv.fs_readdir, dir)
+      if chunk == nil then break end
+      for _, entry in ipairs(chunk) do
+        if #entries >= max_entries then break end
+        entries[#entries + 1] = entry
+      end
     end
-    return next({})
-  end)
-end
+  end))
 
-fs.list_dir_iter = require('blink.lib.fs.list_dir_iter')
+  uv.fs_closedir(dir, function() end)
+  if not ok then error(err, 0) end
+  return entries
+end
 
 --- Equivalent to `preadv(2)`. Returns a string where an empty string indicates EOF
+--- @async
 --- @param path string
 --- @param size integer
 --- @param offset integer?
---- @return blink.lib.Task<string?>
+--- @return string
 function fs.read(path, size, offset)
-  return task.new(function(resolve, reject)
-    uv.fs_open(path, 'r', 438, function(open_err, fd)
-      if open_err or fd == nil then return reject(open_err or 'Unknown error while opening file') end
-      uv.fs_read(fd, size, offset or 0, function(read_err, data)
-        uv.fs_close(fd, function() end)
-        if read_err or data == nil then return reject(read_err or 'Unknown error while closing file') end
-        return resolve(data)
-      end)
-    end)
-  end)
+  local fd = fs.open(path, 'r', 438)
+  local ok, data = async.pawait(async.run('blink.lib.fs.read', async.await_err, 4, uv.fs_read, fd, size, offset or 0))
+  uv.fs_close(fd, function() end)
+  if not ok then error(data, 0) end
+  return data or ''
 end
 
 --- Equivalent to `pwritev(2)`. Returns the number of bytes written
+--- @async
 --- @param path string
 --- @param data string
 --- @param offset integer?
---- @return blink.lib.Task<integer?>
+--- @return integer
 function fs.write(path, data, offset)
-  return task.new(function(resolve, reject)
-    uv.fs_open(path, 'w', 438, function(open_err, fd)
-      if open_err or fd == nil then return reject(open_err or 'Unknown error') end
-      uv.fs_write(fd, data, offset or 0, function(write_err, bytes_written)
-        uv.fs_close(fd, function() end)
-        if write_err then return reject(write_err) end
-        return resolve(bytes_written)
-      end)
-    end)
-  end)
+  local fd = fs.open(path, 'w', 438)
+  local ok, bytes_written =
+    async.pawait(async.run('blink.lib.fs.write', async.await_err, 4, uv.fs_write, fd, data, offset or 0))
+  uv.fs_close(fd, function() end)
+  if not ok then error(bytes_written, 0) end
+  return bytes_written
 end
 
 --- Equivalent to `unlink(2)`
-function fs.rm(path)
-  return task.wrap(function(cb) uv.fs_unlink(path, cb) end)
-end
-
+--- @async
 --- @param path string
---- @return blink.lib.Task<boolean>
+function fs.rm(path) async.await_err(2, uv.fs_unlink, path) end
+
+--- @async
+--- @param path string
+--- @return boolean
 function fs.exists(path)
-  return task.new(function(resolve)
-    uv.fs_stat(path, function(err) resolve(not err) end)
-  end)
+  local err = async.await(2, uv.fs_stat, path)
+  return err == nil
 end
 
 --- Equivalent to `stat(2)`
+--- @async
 --- @param path string
---- @return blink.lib.Task<uv.aliases.fs_stat_table>
-function fs.stat(path)
-  return task.wrap(function(cb) uv.fs_stat(path, cb) end)
+--- @return uv.aliases.fs_stat_table
+function fs.stat(path) return async.await_err(2, uv.fs_stat, path) end
+
+--- @async
+--- @param path string
+--- @return boolean
+local function is_dir(path)
+  local err, stat = async.await(2, uv.fs_stat, path)
+  return err == nil and stat ~= nil and stat.type == 'directory'
 end
 
 --- Creates a directory (non-recursive), no-op if the directory already exists
+--- @async
 --- @param path string
 --- @param mode integer? Defaults to `511`
---- @return blink.lib.Task<nil>
 function fs.mkdir(path, mode)
-  return fs.stat(path)
-    :map(function(stat) return stat.type == 'directory' end)
-    :catch(function() return false end)
-    :map(function(exists)
-      if exists then return end
-      return task.wrap(function(cb) uv.fs_mkdir(path, mode or 511, cb) end)
-    end)
+  if is_dir(path) then return end
+  async.await_err(3, uv.fs_mkdir, path, mode or 511)
 end
 
 --- Recursively creates a directory, no-op if the directory already exists
+--- @async
 --- @param path string
 --- @param mode integer? Defaults to `511`
---- @return blink.lib.Task<nil>
 function fs.mkdirp(path, mode)
-  return fs.stat(path)
-    :map(function(stat) return stat.type == 'directory' end)
-    :catch(function() return false end)
-    :map(function(exists)
-      if exists then return end
-      return fs.mkdirp(fs.dirname(path), mode):map(function() return fs.mkdir(path, mode) end)
-    end)
+  if is_dir(path) then return end
+  local parent = fs.dirname(path)
+  if parent ~= nil and parent ~= path then fs.mkdirp(parent, mode) end
+  fs.mkdir(path, mode)
 end
 
 --- Equivalent to `rename(2)`
+--- @async
 --- @param old_path string
 --- @param new_path string
---- @return blink.lib.Task<nil>
-function fs.rename(old_path, new_path)
-  return task.wrap(function(cb) uv.fs_rename(old_path, new_path, cb) end)
-end
+function fs.rename(old_path, new_path) async.await_err(3, uv.fs_rename, old_path, new_path) end
 
 ------------------
 --- Path utilities

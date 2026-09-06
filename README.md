@@ -32,7 +32,7 @@ All APIs are unstable until v1!
 
 Modules that are planned but not yet implemented:
 
-- [ ] `blink.lib.lsp`: In-process LSP client wrapper
+- [x] `blink.lib.lsp`: In-process LSP server framework
 - [ ] `blink.lib.git`: Git APIs using [`gix`](https://github.com/Byron/gitoxide)
 - [ ] `blink.lib.regex`: Regex using [`regex`](https://docs.rs/regex/latest/regex/)
 - [ ] `blink.lib.persist`: KV store with namespaces
@@ -98,7 +98,8 @@ config({ other_setting = { 3, 'foo' }})
 print(config.enabled) -- true (would be `false` if `mode` was `c`)
 print(config.some_setting) -- 'bar' (from vim.b.my_plugin)
 print(config.other_setting) -- { 3, 'foo' } (from config(...))
-print(config.nested.setting) -- function (from config(..., { bufnr = 0 }))
+
+-- schema only: defaults and validation without the per-buffer/mode scopes, e.g. for LSP server settingsprint(config.nested.setting) -- function (from config(..., { bufnr = 0 }))
 ```
 
 ### `blink.lib.native`
@@ -173,7 +174,7 @@ end
 
 #### `blink.lib.native` low level APIs
 
-Must more control allows for building with just about any build system.
+Much more control allows for building with just about any build system.
 
 ```lua
 local native = require('blink.lib.native')

@@ -1,12 +1,12 @@
 local require = require('blink.lib.lazy_require')
 return {
+  async = require('blink.lib.async'),
   build = require('blink.lib.build'),
   config = require('blink.lib.config'),
   download = require('blink.lib.download'),
   fs = require('blink.lib.fs'),
   log = require('blink.lib.log'),
   lsp = require('blink.lib.lsp'),
-  task = require('blink.lib.task'),
   native = require('blink.lib.native'),
   nvim = require('blink.lib.nvim'),
   timer = require('blink.lib.timer'),
