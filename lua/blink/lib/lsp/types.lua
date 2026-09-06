@@ -1,0 +1,82 @@
+--- Types for `blink.lib.lsp`. Annotations only, nothing to require at runtime.
+
+--- Request handler. Runs as its own `vim.async` task; the return value is the response,
+--- `error()` becomes an `InternalError` response, closing the task a `RequestCancelled` one.
+--- @alias blink.lib.lsp.Handler async fun(params: table, ctx: blink.lib.lsp.Ctx): any
+
+--- Notification handler. Runs as its own `vim.async` task; errors go through the error path.
+--- @alias blink.lib.lsp.NotificationHandler async fun(params: table, ctx: blink.lib.lsp.Ctx)
+
+--- @class blink.lib.lsp.server.Opts
+--- Server name. Used for task names, log prefixes and `:checkhealth`.
+--- @field name string
+--- Capabilities advertised on `initialize`. Defaults merged in: `positionEncoding = 'utf-8'` and
+--- `textDocumentSync = None`. `srv.settings` is resolved before this runs.
+--- @field capabilities? lsp.ServerCapabilities | fun(params: lsp.InitializeParams, srv: blink.lib.lsp.Server): lsp.ServerCapabilities
+--- Default settings, or a `blink.lib.config.schema(...)` which also validates. Deep-merged under
+--- `config.settings` when the factory runs, before `initialize`, and again on every
+--- `workspace/didChangeConfiguration`.
+--- @field settings? table | blink.lib.ConfigSchemaObject
+--- Validates merged settings, after the schema when `settings` is one; raise (`vim.validate`, `error()`)
+--- to reject. On rejection the previous settings are kept and the error is reported through the error path.
+--- @field validate? fun(settings: table)
+--- Called after the `initialize` response is sent. Errors are reported and never fail `initialize`.
+--- @field on_init? fun(srv: blink.lib.lsp.Server, params: lsp.InitializeParams)
+--- Called on `textDocument/didOpen`. Requires `textDocumentSync.openClose = true`.
+--- @field on_attach? fun(srv: blink.lib.lsp.Server, bufnr: integer)
+--- Called on `textDocument/didClose`.
+--- @field on_detach? fun(srv: blink.lib.lsp.Server, bufnr: integer)
+--- Called on `workspace/didChangeConfiguration` after merge and successful validation.
+--- @field on_settings? fun(srv: blink.lib.lsp.Server, settings: table)
+--- Called on `exit`, after every pending task has been closed.
+--- @field on_exit? fun(srv: blink.lib.lsp.Server)
+--- Request handlers keyed by method. Shared across instances; per-instance state lives in `srv.state`.
+--- @field handlers? table<string, blink.lib.lsp.Handler>
+--- Notification handlers keyed by method.
+--- @field notifications? table<string, blink.lib.lsp.NotificationHandler>
+
+--- One server instance per `vim.lsp.Client`.
+--- @class blink.lib.lsp.Server
+--- Server name from `Opts.name`.
+--- @field name string
+--- The `vim.lsp.ClientConfig` handed to the factory (`root_dir`, `settings`, ...).
+--- @field config vim.lsp.ClientConfig
+--- Defaults deep-merged with `config.settings` and accepted by `validate`. Replaced on
+--- `workspace/didChangeConfiguration` only when validation passes.
+--- @field settings table
+--- Capabilities sent in the `initialize` response.
+--- @field capabilities lsp.ServerCapabilities
+--- Free-form per-instance state.
+--- @field state table
+--- The `vim.lsp.rpc.Client` returned to nvim.
+--- @field rpc vim.lsp.rpc.Client
+--- The `vim.lsp.Client` driving this instance, resolved lazily via `client.rpc == srv.rpc`.
+--- @field client fun(): vim.lsp.Client
+--- Sends a notification to the client. Usable outside a request (timers, `nvim_buf_attach`).
+--- @field notify fun(method: string, params: table)
+--- Sends a request to the client. Synchronous (`dispatchers.server_request`); main loop only.
+--- @field request fun(method: string, params: table): any?, lsp.ResponseError?
+--- Registers a capability via `client/registerCapability`. Returns the registration id.
+--- @field register fun(method: string, registerOptions?: table): string
+--- Reverts `register()` via `client/unregisterCapability`.
+--- @field unregister fun(id: string)
+--- Creates a `window/workDoneProgress/create` token and returns a reporter.
+--- @field progress fun(title: string): blink.lib.lsp.Progress
+--- Logs via `window/logMessage` (`:LspLog`).
+--- @field log fun(level: lsp.MessageType, message: string)
+
+--- @class blink.lib.lsp.Progress
+--- @field report fun(message?: string, percentage?: integer)
+--- @field done fun(message?: string)
+
+--- One per request or notification.
+--- @class blink.lib.lsp.Ctx
+--- Request id; nil for notifications.
+--- @field id? integer
+--- Method being handled.
+--- @field method string
+--- Server instance handling the request.
+--- @field srv blink.lib.lsp.Server
+--- Task running the handler. Every `await` is a cancellation point; use `vim.async.is_closing()`
+--- inside long synchronous loops.
+--- @field task vim.async.Task
