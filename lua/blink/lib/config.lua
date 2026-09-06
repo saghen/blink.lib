@@ -8,7 +8,20 @@ local M = { types = {}, utils = {} }
 --- @field [1] any Default value
 --- @field [2] blink.lib.ConfigSchemaType Allowed types or validator
 
---- @alias blink.lib.ConfigSchema { [string]: blink.lib.ConfigSchema | blink.lib.ConfigSchemaField }
+--- Nested tables are nested schemas. The reserved `__validate` key holds a table-level validator, run
+--- after every field passed, for constraints across fields. Skipped in partial validation.
+--- @alias blink.lib.ConfigSchema { [string]: blink.lib.ConfigSchema | blink.lib.ConfigSchemaField, __validate?: fun(tbl: table): boolean?, string? }
+
+--- Defaults and validation for a schema, without the per-buffer and per-mode scopes of `blink.lib.Config`.
+--- Suited to settings owned by something else, like an in-process LSP server or an API argument.
+--- @class blink.lib.ConfigSchemaObject
+--- @field schema blink.lib.ConfigSchema
+--- @field default table Defaults extracted from the schema. Do not mutate.
+--- @field validate fun(tbl: table, opts?: blink.lib.config.ValidateOpts) Raises on failure
+--- @field __blink_lib_schema true
+
+--- @class blink.lib.config.ValidateOpts
+--- @field partial? boolean Missing fields are accepted, `__validate` hooks are skipped. Defaults to false
 
 --- @alias blink.lib.config.Mode 'normal' | 'visual' | 'select' | 'insert' | 'replace' | 'cmdline' | 'terminal' | string
 
@@ -81,13 +94,34 @@ vim.api.nvim_create_autocmd('ModeChanged', {
 --- @field __blink_lib_config true
 --- @overload fun(tbl: table, opts?: blink.lib.config.SetOpts): blink.lib.Config Alias for `set`
 
---- @param schema blink.lib.ConfigSchema
+--- @param v any
+--- @return boolean
+function M.is_schema(v) return type(v) == 'table' and v.__blink_lib_schema == true end
+
+--- @param schema blink.lib.ConfigSchema | blink.lib.ConfigSchemaObject
+--- @return blink.lib.ConfigSchemaObject
+function M.schema(schema)
+  if M.is_schema(schema) then
+    return schema --[[@as blink.lib.ConfigSchemaObject]]
+  end
+  --- @cast schema blink.lib.ConfigSchema
+  return {
+    schema = schema,
+    default = M.utils.extract_default(schema),
+    validate = function(tbl, opts) M.validate(schema, tbl, opts) end,
+    __blink_lib_schema = true,
+  }
+end
+
+--- @param schema blink.lib.ConfigSchema | blink.lib.ConfigSchemaObject
 --- @param opts? blink.lib.config.Opts
 --- @return blink.lib.Config
 function M.new(schema, opts)
   opts = opts or {}
 
-  local global = M.utils.extract_default(schema)
+  local obj = M.schema(schema)
+  schema = obj.schema
+  local global = vim.deepcopy(obj.default)
   if opts.validate ~= false then M.validate(schema, global) end
 
   local per_mode = {} --- @type table<string, table>
@@ -167,7 +201,7 @@ function M.new(schema, opts)
   end
 
   for key in pairs(schema) do
-    if rawget(self, key) ~= nil then
+    if key ~= '__validate' and rawget(self, key) ~= nil then
       error('"' .. tostring(key) .. '" is a reserved key and cannot be used in a schema')
     end
   end
@@ -180,36 +214,49 @@ end
 
 --- @param schema blink.lib.ConfigSchema
 --- @param tbl table
+--- @param opts? blink.lib.config.ValidateOpts
 --- @param parent_path string? For internal use only
-function M.validate(schema, tbl, parent_path)
+function M.validate(schema, tbl, opts, parent_path)
+  local partial = opts ~= nil and opts.partial == true
   parent_path = parent_path or ''
 
   for key in next, tbl do
-    if schema[key] == nil then error(parent_path .. tostring(key) .. ': unknown field') end
+    if key == '__validate' or schema[key] == nil then error(parent_path .. tostring(key) .. ': unknown field', 0) end
   end
 
   for key, field in pairs(schema) do
-    -- nested schema
-    if field[2] == nil then
-      local nested_tbl = tbl[key]
-      if type(nested_tbl) ~= 'table' then
+    local val = tbl[key]
+    if key == '__validate' or (partial and val == nil) then
+      -- skip
+
+      -- nested schema
+    elseif field[2] == nil then
+      if type(val) ~= 'table' then
         local path = parent_path .. key
-        error(path .. ': expected nested table, got ' .. M.utils.describe_value(tbl[key]))
+        error(path .. ': expected nested table, got ' .. M.utils.describe_value(val), 0)
       end
-      M.validate(field, tbl[key], parent_path .. key .. '.')
+      M.validate(field, val, opts, parent_path .. key .. '.')
 
     -- field type
     else
       local t = field[2]
-      local ok, inner_err = M.utils.validate_value(tbl[key], t)
+      local ok, inner_err = M.utils.validate_value(val, t)
       if not ok then
         local path = parent_path .. key
         if inner_err then
-          error(path .. inner_err)
+          error(path .. inner_err, 0)
         else
-          error(path .. ': expected ' .. M.utils.describe_type(t) .. ', got ' .. M.utils.describe_value(tbl[key]))
+          error(path .. ': expected ' .. M.utils.describe_type(t) .. ', got ' .. M.utils.describe_value(val), 0)
         end
       end
+    end
+  end
+
+  if not partial and schema.__validate ~= nil then
+    local ok, err = schema.__validate(tbl)
+    if ok == false then
+      local path = parent_path:sub(1, -2)
+      error((path ~= '' and (path .. ': ') or '') .. (err or 'invalid'), 0)
     end
   end
 end
@@ -443,7 +490,9 @@ end
 function M.utils.extract_default(schema)
   local default = {}
   for key, field in pairs(schema) do
-    if field[2] ~= nil then
+    if key == '__validate' then
+      -- skip
+    elseif field[2] ~= nil then
       default[key] = field[1]
     else
       default[key] = M.utils.extract_default(field)

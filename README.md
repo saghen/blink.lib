@@ -99,7 +99,16 @@ print(config.enabled) -- true (would be `false` if `mode` was `c`)
 print(config.some_setting) -- 'bar' (from vim.b.my_plugin)
 print(config.other_setting) -- { 3, 'foo' } (from config(...))
 
--- schema only: defaults and validation without the per-buffer/mode scopes, e.g. for LSP server settingsprint(config.nested.setting) -- function (from config(..., { bufnr = 0 }))
+-- schema only: defaults and validation without the per-buffer/mode scopes, e.g. for LSP server settings
+local schema = require('blink.lib.config').schema({
+  max_sync = { 100, 'number' },
+  max_async = { 1000, 'number' },
+  __validate = function(s) return s.max_async > s.max_sync, 'max_async must be greater than max_sync' end,
+})
+schema.default -- { max_sync = 100, max_async = 1000 }
+schema.validate({ max_sync = 5000, max_async = 1000 }) -- error: max_async must be greater than max_sync
+schema.validate({ max_sync = 50 }, { partial = true }) -- ok, missing fields and `__validate` skipped
+print(config.nested.setting) -- function (from config(..., { bufnr = 0 }))
 ```
 
 ### `blink.lib.native`
