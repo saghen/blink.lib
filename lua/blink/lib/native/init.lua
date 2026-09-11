@@ -155,7 +155,7 @@ end
 --- @param path string Path to the repository root or some path inside the repository
 --- @return string? git_repo_root Path to the repository root
 function native.git_repo_root(path)
-  local git_dir = vim.fs.find('.git', { upward = true, path = vim.fs.normalize(path), type = 'directory' })[1]
+  local git_dir = vim.fs.find('.git', { upward = true, path = vim.fs.normalize(path)})[1]
   if not git_dir then return end
   return vim.fn.fnamemodify(git_dir, ':h')
 end
@@ -173,9 +173,24 @@ function native.git_commit(repo_root)
     vim.uv.fs_close(fd)
     return content
   end
+  local git_dir = repo_root .. '/.git'
+  if vim.fn.isdirectory(git_dir) == 0 then
+	local git_redirection = read_file(git_dir)
 
+	-- submodule .git file contains a redirection in format "gitdir: PATH"
+	git_dir = git_redirection:match('^gitdir: (.+)$')
+	if git_dir == nil then
+	  error('Something wrong with submodule .git file in' .. repo_root .. '/.git')
+	end
+	
+	git_dir = vim.trim(git_dir)
+	
+	if vim.fn.isabsolutepath(git_dir) == 0 then
+	  git_dir = repo_root .. '/' .. git_dir
+	end
+  end
   -- Read HEAD
-  local head_path = repo_root .. '/.git/HEAD'
+  local head_path = git_dir .. '/HEAD'
   local head_content = read_file(head_path)
   if not head_content then error('Failed to read ' .. head_path) end
   head_content = vim.trim(head_content)
@@ -187,7 +202,7 @@ function native.git_commit(repo_root)
   local ref = head_content:match('^ref: (.+)$')
   if ref then
     -- Try to read the loose ref file (e.g. .git/refs/heads/main)
-    local ref_path = repo_root .. '/.git/' .. ref
+    local ref_path = git_dir .. '/' .. ref
     local ref_content = read_file(ref_path)
     if ref_content then return vim.trim(ref_content) end
   end
