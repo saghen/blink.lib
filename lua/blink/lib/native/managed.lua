@@ -93,7 +93,8 @@ end
 function managed:download(get_download_url, opts)
   local logger = self.logger
   return task
-    .new(function(resolve, _reject)
+    .resolve()
+    :map(function()
       -- ensure repository is available for native.resolve()
       assert(self.repo_root ~= nil, 'Could not find git repo root, did you install via a package manager?')
       vim.opt.runtimepath:append(self.repo_root)
@@ -103,7 +104,7 @@ function managed:download(get_download_url, opts)
       if current_commit ~= nil then self.git_commit = current_commit end
 
       opts = opts or {}
-      if not opts.force and self:library_available() then return resolve() end
+      if not opts.force and self:library_available() then return end
 
       logger:notify(vim.log.levels.INFO, 'Downloading ' .. self.module_name .. ' precompiled library')
 

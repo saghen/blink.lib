@@ -78,7 +78,9 @@ function native.download(url, path, callback)
     vim.uv.fs_unlink(new_path)
   end
 
-  vim.net.request(url, { outpath = path }, function(err) callback(tostring(err)) end)
+  vim.net.request(url, { outpath = path }, function(err)
+    callback(err ~= nil and tostring(err) or nil)
+  end)
 end
 
 --- @param url string
